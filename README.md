@@ -4,6 +4,12 @@ A **multiplayer browser games library** built with [Astro.build](https://astro.b
 
 **Live site:** https://sagreenxyz.github.io/games/
 
+## Local Development
+
+- **Node.js:** `>=22.12.0` (Astro 6 requirement)
+- This repo works with `nvm`; a matching version file is included.
+- If your shell is on an older Node release, run `nvm use` before `npm install` or `npm run dev`.
+
 ---
 
 ## 🃏 Games Available
