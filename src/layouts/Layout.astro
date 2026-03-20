@@ -1,0 +1,35 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description = 'A library of multiplayer browser games' } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, ''); // strip trailing slash
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content={description} />
+  <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+  <title>{title} – Games Library</title>
+</head>
+<body>
+  <header style="background:rgba(0,0,0,.35);padding:.8rem 1.5rem;display:flex;align-items:center;gap:1rem;border-bottom:1px solid rgba(255,255,255,.1);">
+    <a href={`${base}/`} style="font-size:1.3rem;font-weight:800;color:var(--gold);text-decoration:none;">🎮 Games Library</a>
+    <nav style="margin-left:auto;display:flex;gap:1rem;">
+      <a href={`${base}/`}>Home</a>
+      <a href={`${base}/poker`}>Poker</a>
+    </nav>
+  </header>
+  <main>
+    <slot />
+  </main>
+  <footer style="text-align:center;padding:1.5rem;font-size:.8rem;color:rgba(255,255,255,.4);border-top:1px solid rgba(255,255,255,.08);margin-top:3rem;">
+    Games Library — open to all, no login required
+  </footer>
+</body>
+</html>

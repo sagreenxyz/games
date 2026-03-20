@@ -1,0 +1,36 @@
+---
+import Layout from '../layouts/Layout.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Layout title="Home">
+  <section style="max-width:900px;margin:3rem auto;padding:0 1.5rem;">
+    <h1 style="font-size:2.5rem;margin-bottom:.5rem;">🎮 Games Library</h1>
+    <p style="color:rgba(255,255,255,.7);font-size:1.1rem;margin-bottom:2.5rem;">
+      Pick a game, invite friends, and play — no account needed.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.5rem;">
+      <!-- Poker card -->
+      <a href={`${base}/poker`} style="text-decoration:none;">
+        <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);border:2px solid transparent;transition:border-color .2s,transform .2s;"
+             onmouseover="this.style.borderColor='var(--gold)';this.style.transform='translateY(-4px)'"
+             onmouseout="this.style.borderColor='transparent';this.style.transform=''">
+          <div style="font-size:3rem;margin-bottom:.75rem;">🃏</div>
+          <h2 style="color:var(--gold);margin-bottom:.4rem;">Poker</h2>
+          <p style="color:rgba(255,255,255,.75);font-size:.9rem;">Texas Hold'em — up to 4 players.<br/>AI fills empty seats automatically.</p>
+          <div style="margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap;">
+            <span class="badge badge-gold">2–4 Players</span>
+            <span class="badge badge-green">AI Opponents</span>
+          </div>
+        </div>
+      </a>
+
+      <!-- Placeholder for future games -->
+      <div style="background:rgba(255,255,255,.04);border-radius:var(--radius);padding:1.5rem;border:2px dashed rgba(255,255,255,.15);opacity:.5;">
+        <div style="font-size:3rem;margin-bottom:.75rem;">🎲</div>
+        <h2 style="color:rgba(255,255,255,.5);margin-bottom:.4rem;">More Coming Soon</h2>
+        <p style="color:rgba(255,255,255,.4);font-size:.9rem;">Additional games will be added to the library.</p>
+      </div>
+    </div>
+  </section>
+</Layout>
