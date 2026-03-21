@@ -611,6 +611,15 @@ function nextPhase(gs) {
   pushState(gs);
 }
 
+/**
+ * Evaluate all remaining (non-folded) hands against the community cards,
+ * award the pot to the winner(s), and schedule the next round.
+ *
+ * Split pots: each winner receives Math.floor(pot / winners). Any indivisible
+ * remainder chip is currently discarded (known minor limitation — see
+ * CONTRIBUTING.md § Known Issues).
+ * @param {object} gs - game state (mutated in-place)
+ */
 function resolveShowdown(gs) {
   const active = Object.keys(gs.players)
     .map(Number)
@@ -693,6 +702,13 @@ function startNewRound(gs) {
 /* ─────────────────────────────────────────────
    Turn management
 ───────────────────────────────────────────── */
+/**
+ * Returns the occupied, active, non-folded seat numbers in clockwise order
+ * starting from the seat immediately left of the dealer.
+ * All-in players ARE included (they stay in the hand until showdown).
+ * @param {object} gs - game state
+ * @returns {number[]}
+ */
 function activeSeatOrder(gs) {
   const seats = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
@@ -702,7 +718,18 @@ function activeSeatOrder(gs) {
   return seats;
 }
 
-/** Check if the current betting round is over */
+/**
+ * Returns true when the current betting street is over.
+ *
+ * Current implementation: all active (non-folded, non-all-in) players have
+ * matched currentBet. This is sufficient for 2-player games but has two known
+ * limitations in 3+ player games:
+ *   1. All-check on a new street resolves immediately (all bets start at 0).
+ *   2. The Big Blind does not receive their pre-flop option if everyone called.
+ * See CONTRIBUTING.md § Known Issues for the planned fix (gs.streetActed).
+ * @param {object} gs - game state
+ * @returns {boolean}
+ */
 function isBettingRoundOver(gs) {
   const active = Object.keys(gs.players)
     .map(Number)
@@ -712,6 +739,16 @@ function isBettingRoundOver(gs) {
   return active.every(i => gs.players[i].bet === gs.currentBet);
 }
 
+/**
+ * Returns the seat number of the next player to act after gs.currentPlayer.
+ *
+ * Uses activeSeatOrder to find the next non-folded, non-all-in seat.
+ * Known limitation: if gs.currentPlayer just folded, indexOf returns -1 and
+ * active[0] is returned (first seat after dealer) instead of the true next
+ * seat in rotation. See CONTRIBUTING.md § Known Issues.
+ * @param {object} gs - game state
+ * @returns {number} seat index, or -1 if no player can act
+ */
 function nextPlayer(gs) {
   const active = activeSeatOrder(gs).filter(s => !gs.players[s].folded && !gs.players[s].allIn);
   if (active.length === 0) return -1;
@@ -722,6 +759,19 @@ function nextPlayer(gs) {
 /* ─────────────────────────────────────────────
    Player action handler
 ───────────────────────────────────────────── */
+/**
+ * Apply a player action to the game state and push the result.
+ * Called by the host for both its own actions and actions relayed from peers.
+ *
+ * After applying the action, checks whether the round is over and either
+ * advances the phase or moves to the next player. All state mutations end
+ * with a pushState() call that broadcasts to peers and re-renders the host UI.
+ *
+ * @param {object} gs   - game state (mutated in-place)
+ * @param {number} seat - seat index of the acting player
+ * @param {'fold'|'check'|'call'|'raise'|'allin'} action
+ * @param {number} [amount=0] - raise amount (above the call, in chips)
+ */
 function applyAction(gs, seat, action, amount = 0) {
   const p = gs.players[seat];
   if (!p) return;
