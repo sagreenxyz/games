@@ -172,16 +172,16 @@ let view = 'lobby';
    Gun.js initialisation
 ───────────────────────────────────────────── */
 function initGun() {
-  // Gun.js public relay peers for P2P state sync.
-  // These are community-maintained free relays — no credentials required.
-  // If all relays are unavailable, real-time sync won't work but the UI still loads.
-  // To use your own relay, set window.GUN_PEERS before this script loads.
+  // Gun.js relay peers for P2P state sync.
+  // WebRTC (gun/lib/webrtc) is loaded below for direct browser-to-browser
+  // connections on the same network without needing any relay at all.
+  // For cross-network play a relay is required — set window.GUN_PEERS to
+  // override with your own server, or leave as-is for the public relays.
   const peers = window.GUN_PEERS || [
-    'https://gun-manhattan.herokuapp.com/gun',
-    'https://gunjs.herokuapp.com/gun',
-    'https://gun-us.herokuapp.com/gun',
+    'https://relay.peer.ooo/gun',
+    'https://gun.eco/gun',
   ];
-  gun = new window.Gun({ peers });
+  gun = new window.Gun({ peers, localStorage: true });
 }
 
 /* ─────────────────────────────────────────────
@@ -225,7 +225,19 @@ function createRoom() {
   showView('waiting');
   el('displayRoomCode').textContent = myRoomCode;
   el('tableRoomCode').textContent = myRoomCode;
+  setInviteLink(myRoomCode);
   updateWaitingRoom(initState);
+}
+
+/** Build and display the shareable invite URL */
+function setInviteLink(code) {
+  const url = new URL(window.location.pathname, window.location.origin);
+  url.searchParams.set('room', code);
+  const href = url.toString();
+  const linkEl = el('inviteLink');
+  if (linkEl) linkEl.textContent = href;
+  // Store so copy-link button can use it
+  el('btnCopyLink')?.setAttribute('data-href', href);
 }
 
 function joinRoom() {
@@ -279,6 +291,8 @@ function joinRoom() {
    State helpers
 ───────────────────────────────────────────── */
 function buildFreshRoomState(code) {
+  // Returns the *parsed* state format (real JS objects).
+  // pushState() serialises it into the flat Gun wire format when writing.
   return {
     roomCode: code,
     phase: 'waiting',       // waiting | pre-flop | flop | turn | river | showdown
@@ -287,9 +301,9 @@ function buildFreshRoomState(code) {
     currentPlayer: -1,
     currentBet: 0,
     pot: 0,
-    playersJSON: JSON.stringify({}),
-    communityJSON: JSON.stringify([]),
-    deckJSON: JSON.stringify([]),
+    players: {},
+    communityCards: [],
+    deck: [],
     hostSeat: 0,
     lastAction: '',
     winnerInfo: '',
@@ -935,7 +949,13 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btnCopyCode')?.addEventListener('click', () => {
     navigator.clipboard.writeText(myRoomCode).catch(() => {});
     el('btnCopyCode').textContent = '✅ Copied';
-    setTimeout(() => { el('btnCopyCode').textContent = '📋 Copy'; }, 2000);
+    setTimeout(() => { el('btnCopyCode').textContent = '📋 Copy code'; }, 2000);
+  });
+  el('btnCopyLink')?.addEventListener('click', () => {
+    const href = el('btnCopyLink')?.getAttribute('data-href') || window.location.href;
+    navigator.clipboard.writeText(href).catch(() => {});
+    el('btnCopyLink').textContent = '✅ Copied';
+    setTimeout(() => { el('btnCopyLink').textContent = '🔗 Copy link'; }, 2000);
   });
 
   // Game actions
