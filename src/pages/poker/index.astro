@@ -128,9 +128,7 @@ import Layout from '../../layouts/Layout.astro';
   </div>
 </Layout>
 
-<!-- Gun.js for real-time P2P sync -->
-<script is:inline src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-<!-- WebRTC transport — enables direct browser-to-browser connections (no relay needed on LAN) -->
-<script is:inline src="https://cdn.jsdelivr.net/npm/gun/lib/webrtc.js"></script>
+<!-- PeerJS — WebRTC-based direct peer-to-peer connections (used by @boardgame.io/p2p) -->
+<script is:inline src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <!-- Poker game logic -->
 <script is:inline src="/games/poker-game.js"></script>
