@@ -85,52 +85,84 @@ import Layout from '../../layouts/Layout.astro';
         <button id="btnLeaveGame" class="btn btn-sm btn-danger">Drop Out</button>
       </div>
 
-      <!-- Opponents (top row) -->
-      <div id="opponentsRow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;"></div>
+      <!-- Main area + sidebar -->
+      <div style="display:flex;gap:1rem;align-items:flex-start;">
 
-      <!-- Community cards + pot -->
-      <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;text-align:center;">
-        <div style="font-size:.8rem;color:rgba(255,255,255,.55);margin-bottom:.5rem;">COMMUNITY CARDS</div>
-        <div id="communityCards" style="display:flex;justify-content:center;gap:.5rem;min-height:96px;align-items:center;flex-wrap:wrap;">
-          <span style="color:rgba(255,255,255,.3);font-style:italic;">Cards will appear here</span>
-        </div>
-        <div style="margin-top:.75rem;font-size:1rem;">
-          Pot: <strong id="potDisplay" style="color:var(--gold);">0</strong> chips
-          &nbsp;|&nbsp; Current bet: <strong id="currentBetDisplay" style="color:var(--gold);">0</strong>
-        </div>
-        <div id="handRankDisplay" style="margin-top:.4rem;font-size:.85rem;color:rgba(255,255,255,.55);min-height:1.2em;"></div>
-      </div>
+        <!-- Left: main game area -->
+        <div style="flex:1;min-width:0;">
 
-      <!-- My hand (bottom) -->
-      <div style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;">
-        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
-          <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
-          <span id="myChipsLabel" class="chips"></span>
-          <span id="myStatusBadge" style="margin-left:auto;"></span>
-        </div>
-        <div id="myCards" style="display:flex;gap:.5rem;flex-wrap:wrap;min-height:96px;align-items:center;">
-          <span style="color:rgba(255,255,255,.3);font-style:italic;">Your cards will appear here</span>
-        </div>
-      </div>
+          <!-- Opponents (top row) -->
+          <div id="opponentsRow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;"></div>
 
-      <!-- Action panel -->
-      <div id="actionPanel" style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;">
-        <div id="turnIndicator" style="font-size:.9rem;color:rgba(255,255,255,.6);margin-bottom:.75rem;min-height:1.3em;"></div>
-        <div id="actionButtons" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;">
-          <button id="btnFold"  class="btn btn-danger"   disabled>Fold</button>
-          <button id="btnCheck" class="btn btn-outline"  disabled>Check</button>
-          <button id="btnCall"  class="btn btn-success"  disabled>Call</button>
-          <div style="display:flex;gap:.5rem;align-items:center;">
-            <button id="btnRaise" class="btn btn-primary" disabled>Raise</button>
-            <input id="raiseAmount" type="number" min="20" step="10"
-                   style="width:90px;display:inline-block;"
-                   placeholder="amount" />
+          <!-- Community cards + pot -->
+          <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;text-align:center;">
+            <div style="font-size:.8rem;color:rgba(255,255,255,.55);margin-bottom:.5rem;">COMMUNITY CARDS</div>
+            <div id="communityCards" style="display:flex;justify-content:center;gap:.5rem;min-height:96px;align-items:center;flex-wrap:wrap;">
+              <span style="color:rgba(255,255,255,.3);font-style:italic;">Cards will appear here</span>
+            </div>
+            <div style="margin-top:.75rem;font-size:1rem;">
+              Pot: <strong id="potDisplay" style="color:var(--gold);">0</strong> chips
+              &nbsp;|&nbsp; Current bet: <strong id="currentBetDisplay" style="color:var(--gold);">0</strong>
+            </div>
+            <div id="handRankDisplay" style="margin-top:.4rem;font-size:.85rem;color:rgba(255,255,255,.55);min-height:1.2em;"></div>
+          </div>
+
+          <!-- My hand (bottom) -->
+          <div style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;">
+            <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
+              <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
+              <span id="myChipsLabel" class="chips"></span>
+              <span id="myStatusBadge" style="margin-left:auto;"></span>
+            </div>
+            <div id="myCards" style="display:flex;gap:.5rem;flex-wrap:wrap;min-height:96px;align-items:center;">
+              <span style="color:rgba(255,255,255,.3);font-style:italic;">Your cards will appear here</span>
+            </div>
+          </div>
+
+          <!-- Action panel -->
+          <div id="actionPanel" style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;">
+            <div id="turnIndicator" style="font-size:.9rem;color:rgba(255,255,255,.6);margin-bottom:.75rem;min-height:1.3em;"></div>
+            <div id="actionButtons" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;">
+              <button id="btnFold"  class="btn btn-danger"   disabled>Fold</button>
+              <button id="btnCheck" class="btn btn-outline"  disabled>Check</button>
+              <button id="btnCall"  class="btn btn-success"  disabled>Call</button>
+              <div style="display:flex;gap:.5rem;align-items:center;">
+                <button id="btnRaise" class="btn btn-primary" disabled>Raise</button>
+                <input id="raiseAmount" type="number" min="20" step="10"
+                       style="width:90px;display:inline-block;"
+                       placeholder="amount" />
+              </div>
+            </div>
+            <div id="gameMessage" style="margin-top:.75rem;font-size:.95rem;min-height:1.3em;color:var(--gold);font-weight:600;"></div>
+          </div>
+
+        </div><!-- end main game area -->
+
+        <!-- Right: action log sidebar -->
+        <div id="actionLogPanel" style="width:210px;flex-shrink:0;background:rgba(0,0,0,.25);border-radius:var(--radius);padding:1rem;box-shadow:var(--shadow);">
+          <div style="font-size:.875rem;font-weight:700;color:var(--gold);margin-bottom:.75rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:.5rem;">📜 Action Log</div>
+          <div id="actionLogList" style="font-size:.78rem;max-height:520px;overflow-y:auto;display:flex;flex-direction:column;gap:.25rem;">
+            <span style="color:rgba(255,255,255,.3);font-style:italic;">Actions will appear here</span>
           </div>
         </div>
-        <div id="gameMessage" style="margin-top:.75rem;font-size:.95rem;min-height:1.3em;color:var(--gold);font-weight:600;"></div>
-      </div>
+
+      </div><!-- end main area + sidebar -->
 
     </section>
+
+    <!-- ══ ROUND OVER MODAL ══ -->
+    <div id="roundOverModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:flex;align-items:center;justify-content:center;">
+      <div style="background:var(--green-felt);border-radius:var(--radius);padding:2rem;max-width:420px;width:90%;text-align:center;box-shadow:var(--shadow);">
+        <div style="font-size:2rem;margin-bottom:.5rem;">🏆</div>
+        <div id="roundOverTitle" style="font-size:1.4rem;font-weight:700;margin-bottom:.75rem;color:var(--gold);">Round Over!</div>
+        <div id="roundOverWinner" style="font-size:1rem;margin-bottom:1.5rem;color:rgba(255,255,255,.9);"></div>
+        <div id="roundOverHostControls" class="hidden" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-bottom:.75rem;">
+          <button id="btnPlayAgain" class="btn btn-primary">🃏 Play Again</button>
+          <button id="btnLeaveAfterRound" class="btn btn-outline">← Leave</button>
+        </div>
+        <div id="roundOverGuestMsg" class="hidden" style="color:rgba(255,255,255,.55);font-size:.875rem;">Waiting for host to start the next round…</div>
+      </div>
+    </div>
   </div>
 </Layout>
 

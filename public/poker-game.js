@@ -23,6 +23,12 @@ const STARTING_CHIPS = 1000;
 const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
 
+const PHASE_LABELS = {
+  'pre-flop': 'Pre-Flop', flop: 'Flop', turn: 'Turn',
+  river: 'River', showdown: 'Showdown',
+};
+function phaseLabel(p) { return PHASE_LABELS[p] || p; }
+
 /** Build and shuffle a 52-card deck */
 function makeDeck() {
   const d = [];
@@ -130,6 +136,7 @@ let mySeat = -1;
 let myRoomCode = '';
 let amHost = false;
 let disconnectedPlayerTimeout = null;
+let roundAdvanceTimeout = null;  // auto-advance timer for new round after showdown
 
 /** Current view: 'lobby' | 'waiting' | 'game' */
 let view = 'lobby';
@@ -162,6 +169,49 @@ function showView(name) {
   show(name === 'lobby' ? 'lobby' :
        name === 'waiting' ? 'waitingRoom' : 'gameTable');
   view = name;
+}
+
+/* ─────────────────────────────────────────────
+   Round-over modal helpers
+───────────────────────────────────────────── */
+function showRoundOverModal(winnerInfo) {
+  setText('roundOverWinner', winnerInfo || '');
+  const hostControls = el('roundOverHostControls');
+  const guestMsg = el('roundOverGuestMsg');
+  if (amHost) {
+    hostControls?.classList.remove('hidden');
+    guestMsg?.classList.add('hidden');
+  } else {
+    hostControls?.classList.add('hidden');
+    guestMsg?.classList.remove('hidden');
+  }
+  el('roundOverModal')?.classList.remove('hidden');
+}
+
+function hideRoundOverModal() {
+  el('roundOverModal')?.classList.add('hidden');
+}
+
+/* ─────────────────────────────────────────────
+   Action log sidebar
+───────────────────────────────────────────── */
+function renderActionLog(gs) {
+  const list = el('actionLogList');
+  if (!list) return;
+  const log = gs.actionLog || [];
+  if (log.length === 0) {
+    list.innerHTML = '<span style="color:rgba(255,255,255,.3);font-style:italic;">Actions will appear here</span>';
+    return;
+  }
+  // Display most recent entry first
+  list.innerHTML = [...log].reverse().map(item => {
+    const isSeparator = item.startsWith('---');
+    if (isSeparator) {
+      return `<div style="text-align:center;color:rgba(255,255,255,.45);font-size:.72rem;padding:.2rem 0;border-top:1px solid rgba(255,255,255,.1);margin:.2rem 0;">${escHtml(item)}</div>`;
+    }
+    const isWinner = item.startsWith('🏆');
+    return `<div style="color:${isWinner ? 'var(--gold)' : 'rgba(255,255,255,.8)'};padding:.1rem 0;${isWinner ? 'font-weight:600;' : ''}">${escHtml(item)}</div>`;
+  }).join('');
 }
 
 /* ─────────────────────────────────────────────
@@ -296,6 +346,7 @@ function buildFreshRoomState(code) {
     lastAction: '',
     winnerInfo: '',
     streetActed: [],        // seats that have voluntarily acted this betting street
+    actionLog: [],          // full history of actions for the sidebar
     updatedAt: Date.now(),
   };
 }
@@ -527,6 +578,7 @@ function startGame(gs) {
     lastAction: '',
     winnerInfo: '',
     streetActed: [],
+    actionLog: [`--- Round 1 ---`],
   };
 
   dealHands(newGs);
@@ -564,6 +616,9 @@ function postBlinds(gs) {
   placeBet(gs, sbSeat, SMALL_BLIND);
   placeBet(gs, bbSeat, BIG_BLIND);
   gs.currentBet = BIG_BLIND;
+  gs.actionLog ??= [];
+  gs.actionLog.push(`${gs.players[sbSeat].name} posts SB (${SMALL_BLIND})`);
+  gs.actionLog.push(`${gs.players[bbSeat].name} posts BB (${BIG_BLIND})`);
   // Pre-flop: first to act is seat after BB (or SB for heads-up)
   if (seats.length === 2) {
     gs.currentPlayer = seats[1]; // SB/dealer acts first heads-up
@@ -597,6 +652,8 @@ function nextPhase(gs) {
   gs.currentBet = 0;
   gs.streetActed = [];
   gs.phase = next;
+  gs.actionLog ??= [];
+  gs.actionLog.push(`--- ${phaseLabel(next)} ---`);
 
   if (next === 'flop') {
     gs.deck.pop(); // burn card (standard poker rule — discarded face-down before dealing)
@@ -652,16 +709,20 @@ function resolveShowdown(gs) {
     return evalHand([...hand, ...gs.communityCards]).name;
   })();
   gs.winnerInfo = `🏆 ${winNames} wins ${gs.pot} chips with ${winHand}!`;
+  gs.actionLog ??= [];
+  gs.actionLog.push(gs.winnerInfo);
   gs.pot = 0;
   gs.phase = 'showdown';
   pushState(gs);
 
-  // Start next round after delay
-  setTimeout(() => {
+  // Start next round after delay; host can also click "Play Again" to advance early
+  clearTimeout(roundAdvanceTimeout);
+  roundAdvanceTimeout = setTimeout(() => {
     if (amHost && localState && localState.phase === 'showdown') {
+      hideRoundOverModal();
       startNewRound(localState);
     }
-  }, 5000);
+  }, 10000);
 }
 
 function startNewRound(gs) {
@@ -697,6 +758,8 @@ function startNewRound(gs) {
   gs.round = (gs.round || 0) + 1;
   gs.winnerInfo = '';
   gs.lastAction = '';
+  gs.actionLog ??= [];
+  gs.actionLog.push(`--- Round ${gs.round} ---`);
 
   dealHands(gs);
   postBlinds(gs);
@@ -824,6 +887,10 @@ function applyAction(gs, seat, action, amount = 0) {
   }
 
   gs.lastAction = label;
+  if (label) {
+    gs.actionLog ??= [];
+    gs.actionLog.push(label);
+  }
 
   // Track which players have voluntarily acted this street.
   // When the current bet was raised, reset the acted set to only the raiser
@@ -848,12 +915,18 @@ function applyAction(gs, seat, action, amount = 0) {
     // This player wins by default
     gs.players[remaining[0]].chips += gs.pot;
     gs.winnerInfo = `🏆 ${gs.players[remaining[0]].name} wins ${gs.pot} chips (everyone else folded)!`;
+    gs.actionLog ??= [];
+    gs.actionLog.push(gs.winnerInfo);
     gs.pot = 0;
     gs.phase = 'showdown';
     pushState(gs);
-    setTimeout(() => {
-      if (amHost && localState && localState.phase === 'showdown') startNewRound(localState);
-    }, 4000);
+    clearTimeout(roundAdvanceTimeout);
+    roundAdvanceTimeout = setTimeout(() => {
+      if (amHost && localState && localState.phase === 'showdown') {
+        hideRoundOverModal();
+        startNewRound(localState);
+      }
+    }, 8000);
     return;
   }
 
@@ -898,13 +971,9 @@ function scheduleHostWork(gs) {
 ───────────────────────────────────────────── */
 function renderGame(gs) {
   const phase = gs.phase;
-  const phaseLabels = {
-    'pre-flop': 'Pre-Flop', flop: 'Flop', turn: 'Turn',
-    river: 'River', showdown: 'Showdown'
-  };
 
   setText('roundLabel', `Round ${gs.round}`);
-  setText('phaseLabel', phaseLabels[phase] || phase);
+  setText('phaseLabel', phaseLabel(phase));
   setText('potDisplay', gs.pot);
   setText('currentBetDisplay', gs.currentBet);
 
@@ -985,7 +1054,7 @@ function renderGame(gs) {
 
   if (gs.phase === 'showdown') {
     setHTML('turnIndicator', gs.winnerInfo
-      ? `<span style="color:var(--gold);">${escHtml(gs.winnerInfo)}</span><br/><span style="font-size:.8rem;color:rgba(255,255,255,.4);">Next round starting soon…</span>`
+      ? `<span style="color:var(--gold);">${escHtml(gs.winnerInfo)}</span>`
       : '');
     // Disable (but do not remove) the action buttons so they remain in the DOM
     // and can be re-enabled when the next round begins.
@@ -993,34 +1062,43 @@ function renderGame(gs) {
       const btn = el(id);
       if (btn) btn.disabled = true;
     });
-  } else if (isMyTurn && !myFolded && !myAllIn) {
-    const toCall = Math.max(0, gs.currentBet - (myPlayer?.bet || 0));
-    const canCheck = toCall === 0;
-    el('btnFold').disabled = false;
-    el('btnCheck').disabled = !canCheck;
-    el('btnCall').disabled = canCheck;
-    el('btnRaise').disabled = false;
-    el('btnCall').textContent = `Call ${toCall}`;
-    const raiseMin = toCall + BIG_BLIND;
-    el('raiseAmount').min = raiseMin;
-    el('raiseAmount').value = raiseMin;
-    setText('turnIndicator', '🟢 Your turn — choose an action');
+    // Show the round-over modal if not already visible
+    if (el('roundOverModal')?.classList.contains('hidden')) {
+      showRoundOverModal(gs.winnerInfo);
+    }
   } else {
-    el('btnFold').disabled = true;
-    el('btnCheck').disabled = true;
-    el('btnCall').disabled = true;
-    el('btnRaise').disabled = true;
-    if (myFolded) {
-      setText('turnIndicator', 'You folded. Waiting for the round to end…');
-    } else if (myAllIn) {
-      setText('turnIndicator', 'You are all-in. Waiting for the hand to resolve…');
+    // Hide modal when a new round is underway
+    hideRoundOverModal();
+    if (isMyTurn && !myFolded && !myAllIn) {
+      const toCall = Math.max(0, gs.currentBet - (myPlayer?.bet || 0));
+      const canCheck = toCall === 0;
+      el('btnFold').disabled = false;
+      el('btnCheck').disabled = !canCheck;
+      el('btnCall').disabled = canCheck;
+      el('btnRaise').disabled = false;
+      el('btnCall').textContent = `Call ${toCall}`;
+      const raiseMin = toCall + BIG_BLIND;
+      el('raiseAmount').min = raiseMin;
+      el('raiseAmount').value = raiseMin;
+      setText('turnIndicator', '🟢 Your turn — choose an action');
     } else {
-      const cp = gs.players[gs.currentPlayer];
-      setText('turnIndicator', cp ? `Waiting for ${cp.name}…` : 'Waiting…');
+      el('btnFold').disabled = true;
+      el('btnCheck').disabled = true;
+      el('btnCall').disabled = true;
+      el('btnRaise').disabled = true;
+      if (myFolded) {
+        setText('turnIndicator', 'You folded. Waiting for the round to end…');
+      } else if (myAllIn) {
+        setText('turnIndicator', 'You are all-in. Waiting for the hand to resolve…');
+      } else {
+        const cp = gs.players[gs.currentPlayer];
+        setText('turnIndicator', cp ? `Waiting for ${cp.name}…` : 'Waiting…');
+      }
     }
   }
 
   setText('gameMessage', gs.lastAction || '');
+  renderActionLog(gs);
 }
 
 /* ─────────────────────────────────────────────
@@ -1053,6 +1131,8 @@ function leaveGame() {
 
 function goToLobby() {
   clearTimeout(disconnectedPlayerTimeout);
+  clearTimeout(roundAdvanceTimeout);
+  hideRoundOverModal();
   // Nullify state before destroying so async close-handlers are no-ops
   const p = peer;
   peer = null;
@@ -1116,6 +1196,19 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   el('btnLeaveGame')?.addEventListener('click', () => {
     if (confirm('Drop out? You will be folded out of the current hand.')) leaveGame();
+  });
+
+  // Round-over modal buttons
+  el('btnPlayAgain')?.addEventListener('click', () => {
+    if (!amHost || !localState) return;
+    clearTimeout(roundAdvanceTimeout);
+    hideRoundOverModal();
+    startNewRound(localState);
+  });
+  el('btnLeaveAfterRound')?.addEventListener('click', () => {
+    clearTimeout(roundAdvanceTimeout);
+    hideRoundOverModal();
+    leaveGame();
   });
 
   // Check URL for room code (so users can share direct links)

@@ -212,4 +212,88 @@ test.describe('Poker — host + guest integration', () => {
     );
   });
 
+  test('action log sidebar shows played steps', async ({ context }) => {
+    const hostPage  = await openPokerPage(context, 'Host');
+    const guestPage = await openPokerPage(context, 'Guest');
+
+    // Setup
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoom(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(hostPage);
+    await waitForGame(guestPage);
+    await expect(hostPage.locator('#myCards .playing-card')).toHaveCount(2, { timeout: 8_000 });
+
+    // Sidebar panel is visible
+    await expect(hostPage.locator('#actionLogPanel')).toBeVisible();
+    await expect(guestPage.locator('#actionLogPanel')).toBeVisible();
+
+    // Sidebar should show blind postings from Round 1
+    await expect(hostPage.locator('#actionLogList')).toContainText('posts SB', { timeout: 5_000 });
+    await expect(hostPage.locator('#actionLogList')).toContainText('posts BB');
+
+    // Active player folds — action should appear in sidebar
+    const activePage = await hostPage.locator('#turnIndicator').textContent()
+      .then(t => /your turn/i.test(t || '') ? hostPage : guestPage);
+    await expect(activePage.locator('#btnFold')).toBeEnabled({ timeout: 5_000 });
+    await activePage.click('#btnFold');
+
+    // Both pages should show a "folds" entry in the action log
+    await expect(hostPage.locator('#actionLogList')).toContainText('folds', { timeout: 8_000 });
+    await expect(guestPage.locator('#actionLogList')).toContainText('folds', { timeout: 8_000 });
+
+    // Winner info (🏆) should appear in the sidebar
+    await expect(hostPage.locator('#actionLogList')).toContainText('🏆', { timeout: 8_000 });
+
+    console.log('  [test] Action log sidebar shows played steps ✅');
+  });
+
+  test('round-over modal appears after hand ends and host can play again', async ({ context }) => {
+    const hostPage  = await openPokerPage(context, 'Host');
+    const guestPage = await openPokerPage(context, 'Guest');
+
+    // Setup
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoom(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(hostPage);
+    await waitForGame(guestPage);
+    await expect(hostPage.locator('#myCards .playing-card')).toHaveCount(2, { timeout: 8_000 });
+
+    // Active player folds to end the round
+    const activePage = await hostPage.locator('#turnIndicator').textContent()
+      .then(t => /your turn/i.test(t || '') ? hostPage : guestPage);
+    await expect(activePage.locator('#btnFold')).toBeEnabled({ timeout: 5_000 });
+    await activePage.click('#btnFold');
+
+    // Round-over modal appears on both pages
+    await expect(hostPage.locator('#roundOverModal')).toBeVisible({ timeout: 8_000 });
+    await expect(guestPage.locator('#roundOverModal')).toBeVisible({ timeout: 8_000 });
+
+    // Modal shows winner info
+    await expect(hostPage.locator('#roundOverWinner')).toContainText('🏆', { timeout: 5_000 });
+
+    // Host sees "Play Again" button; guest sees waiting message
+    await expect(hostPage.locator('#roundOverHostControls')).toBeVisible();
+    await expect(guestPage.locator('#roundOverGuestMsg')).toBeVisible();
+
+    // Host clicks "Play Again" → modal closes and Round 2 starts
+    await hostPage.click('#btnPlayAgain');
+    await expect(hostPage.locator('#roundOverModal')).toBeHidden({ timeout: 5_000 });
+    await expect(hostPage.locator('#roundLabel')).toHaveText('Round 2', { timeout: 10_000 });
+    await expect(guestPage.locator('#roundLabel')).toHaveText('Round 2', { timeout: 10_000 });
+    // Modal should also be hidden on guest side after round 2 begins
+    await expect(guestPage.locator('#roundOverModal')).toBeHidden({ timeout: 5_000 });
+
+    console.log('  [test] Round-over modal and Play Again ✅');
+  });
+
 });
