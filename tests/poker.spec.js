@@ -134,6 +134,61 @@ test.describe('Poker — host + guest integration', () => {
     console.log('  [test] Full host+guest round completed ✅');
   });
 
+  test('turn returns to the other player after first flop action (regression)', async ({ context }) => {
+    // Regression test for: after the guest played their turn, focus never returned
+    // to the host because isBettingRoundOver() was true the moment bets reset to 0
+    // on a new street, so the second player never got to act.
+    const hostPage  = await openPokerPage(context, 'Host');
+    const guestPage = await openPokerPage(context, 'Guest');
+
+    // ── Setup ──────────────────────────────────────────────────────────────────
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoom(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(hostPage);
+    await waitForGame(guestPage);
+    await expect(hostPage.locator('#myCards .playing-card')).toHaveCount(2, { timeout: 8_000 });
+
+    // ── Pre-flop: both players act (call then check) to advance to the flop ───
+    const hostHasTurnPreflop = await hostPage.locator('#turnIndicator').textContent()
+      .then(t => /your turn/i.test(t || ''));
+    const preflopFirst  = hostHasTurnPreflop ? hostPage  : guestPage;
+    const preflopSecond = hostHasTurnPreflop ? guestPage : hostPage;
+
+    // First pre-flop actor calls (matches the big blind)
+    await expect(preflopFirst.locator('#btnCall')).toBeEnabled({ timeout: 5_000 });
+    await preflopFirst.click('#btnCall');
+
+    // Second pre-flop actor checks (BB option — no raise needed)
+    await expect(preflopSecond.locator('#btnCheck')).toBeEnabled({ timeout: 5_000 });
+    await preflopSecond.click('#btnCheck');
+
+    // ── Both players should now be on the Flop ────────────────────────────────
+    await expect(hostPage.locator('#phaseLabel')).toHaveText('Flop', { timeout: 8_000 });
+    await expect(guestPage.locator('#phaseLabel')).toHaveText('Flop', { timeout: 8_000 });
+
+    // ── Flop: first actor checks; second actor MUST then get their turn ───────
+    const hostHasTurnFlop = await hostPage.locator('#turnIndicator').textContent()
+      .then(t => /your turn/i.test(t || ''));
+    const flopFirst  = hostHasTurnFlop ? hostPage  : guestPage;
+    const flopSecond = hostHasTurnFlop ? guestPage : hostPage;
+
+    await expect(flopFirst.locator('#btnCheck')).toBeEnabled({ timeout: 5_000 });
+    await flopFirst.click('#btnCheck');
+
+    // Before the fix, isBettingRoundOver() returned true immediately (all bets = 0
+    // = currentBet), skipping the second player's flop turn entirely.
+    await expect(flopSecond.locator('#turnIndicator')).toContainText(/your turn/i, { timeout: 8_000 });
+    await expect(flopSecond.locator('#btnCheck')).toBeEnabled();
+    await expect(flopFirst.locator('#btnFold')).toBeDisabled();
+
+    console.log('  [test] Turn correctly returns to second player on flop ✅');
+  });
+
   test('duplicate player name is rejected', async ({ context }) => {
     const hostPage  = await openPokerPage(context, 'Host');
     const guestPage = await openPokerPage(context, 'Guest');
