@@ -1,11 +1,11 @@
 /**
  * Poker Game — Texas Hold'em
- * Real-time multiplayer via Gun.js (no backend required)
+ * Real-time multiplayer via PeerJS / WebRTC (no backend required)
  *
  * Architecture:
- *  - Gun.js syncs game state across all browsers in real time
+ *  - PeerJS creates a direct WebRTC data-channel between browsers
  *  - The "host" (first player) acts as the dealer:
- *      deals cards, advances phases, plays AI turns
+ *      deals cards, advances phases, plays AI turns, broadcasts state
  *  - Each player sees their own hand privately stored locally;
  *    opponents' hands are hidden until showdown
  *  - AI players fill empty / dropped seats automatically
@@ -155,33 +155,34 @@ function aiDecide(gs, seatIndex) {
 /* ─────────────────────────────────────────────
    Game state manager
 ───────────────────────────────────────────── */
-let gun;
-let roomRef;
-let localState = null;      // full game state (only host writes this)
+// PeerJS instances (replaced Gun.js)
+let peer = null;        // Our PeerJS Peer instance
+let hostConn = null;    // Non-host client's DataConnection to the host peer
+let peerConns = [];     // Host's DataConnections to all joined peers
+/** Maps each DataConnection → the seat number it was assigned. Using a Map
+ *  (rather than attaching a property to the connection object) makes the
+ *  association explicit and avoids relying on object mutation. */
+const connSeatMap = new Map();
+
+let localState = null;      // full game state (only host writes/broadcasts this)
 let myName = '';
 let mySeat = -1;
 let myRoomCode = '';
 let amHost = false;
-let hostHeartbeatInterval = null;
 let aiTurnTimeout = null;
 
 /** Current view: 'lobby' | 'waiting' | 'game' */
 let view = 'lobby';
 
-/* ─────────────────────────────────────────────
-   Gun.js initialisation
-───────────────────────────────────────────── */
-function initGun() {
-  // Gun.js relay peers for P2P state sync.
-  // WebRTC (gun/lib/webrtc) is loaded below for direct browser-to-browser
-  // connections on the same network without needing any relay at all.
-  // For cross-network play a relay is required — set window.GUN_PEERS to
-  // override with your own server, or leave as-is for the public relays.
-  const peers = window.GUN_PEERS || [
-    'https://relay.peer.ooo/gun',
-    'https://gun.eco/gun',
-  ];
-  gun = new window.Gun({ peers, localStorage: true });
+/**
+ * PeerJS Peer constructor options.
+ * Set window.PEER_CONFIG before this script loads to override defaults, e.g.:
+ *   window.PEER_CONFIG = { host: 'my-peerjs-server.example.com', port: 9000, path: '/' };
+ * Supported keys: host, port, path, secure, key, debug, config (ICE servers), etc.
+ * Leave unset to use the PeerJS cloud signalling server (suitable for most use-cases).
+ */
+function peerConfig() {
+  return window.PEER_CONFIG || {};
 }
 
 /* ─────────────────────────────────────────────
@@ -210,23 +211,48 @@ function createRoom() {
   myName = (el('playerName')?.value || '').trim();
   if (!myName) { el('lobbyError').textContent = 'Please enter your name.'; return; }
 
-  myRoomCode = genCode();
   mySeat = 0;
   amHost = true;
+  el('lobbyError').textContent = 'Creating room…';
+  tryOpenHostPeer();
+}
 
-  const initState = buildFreshRoomState(myRoomCode);
-  initState.players[0] = freshPlayer(myName, false);
-  initState.hostSeat = 0;
+/** Open a PeerJS peer using a random room code as the peer ID.
+ *  Retries automatically on the rare unavailable-id collision. */
+function tryOpenHostPeer() {
+  myRoomCode = genCode();
+  peer = new Peer(myRoomCode, peerConfig());
 
-  roomRef = gun.get('games-v1').get(myRoomCode);
-  pushState(initState);
+  peer.on('open', id => {
+    myRoomCode = id;
+    const initState = buildFreshRoomState(id);
+    initState.players[0] = freshPlayer(myName, false);
+    initState.hostSeat = 0;
+    localState = initState;
 
-  subscribeToRoom();
-  showView('waiting');
-  el('displayRoomCode').textContent = myRoomCode;
-  el('tableRoomCode').textContent = myRoomCode;
-  setInviteLink(myRoomCode);
-  updateWaitingRoom(initState);
+    el('lobbyError').textContent = '';
+    showView('waiting');
+    el('displayRoomCode').textContent = id;
+    el('tableRoomCode').textContent = id;
+    setInviteLink(id);
+    updateWaitingRoom(initState);
+  });
+
+  peer.on('connection', handleNewPeerConnection);
+
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      // Extremely rare collision — try a fresh code
+      peer.destroy();
+      tryOpenHostPeer();
+    } else {
+      el('lobbyError').textContent = `Could not create room: ${err.type}`;
+      peer.destroy();
+      peer = null;
+      amHost = false;
+      mySeat = -1;
+    }
+  });
 }
 
 /** Build and display the shareable invite URL */
@@ -247,43 +273,40 @@ function joinRoom() {
   if (code.length !== 6) { el('lobbyError').textContent = 'Room code must be 6 characters.'; return; }
 
   myRoomCode = code;
-  roomRef = gun.get('games-v1').get(myRoomCode);
+  amHost = false;
   el('lobbyError').textContent = 'Connecting…';
 
-  // Read current state once to find an open seat
-  roomRef.once(data => {
-    if (!data || !data.phase) {
+  // Create our own peer with a random ID, then connect to the host's peer (room code = peer ID).
+  // PeerJS fires 'peer-unavailable' immediately if the host doesn't exist — no 7-second wait.
+  peer = new Peer(peerConfig());
+
+  peer.on('open', () => {
+    hostConn = peer.connect(myRoomCode, { serialization: 'json', reliable: true });
+
+    hostConn.on('open', () => {
+      hostConn.send({ type: 'join', name: myName });
+    });
+
+    hostConn.on('data', handleHostMessage);
+
+    hostConn.on('close', () => {
+      if (view !== 'lobby') goToLobby();
+    });
+
+    hostConn.on('error', err => {
+      el('lobbyError').textContent = `Connection error: ${err}`;
+    });
+  });
+
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable') {
       el('lobbyError').textContent = 'Room not found. Check the code.';
-      return;
+    } else {
+      el('lobbyError').textContent = `Error: ${err.type}`;
     }
-    if (data.phase !== 'waiting') {
-      el('lobbyError').textContent = 'Game already in progress in that room.';
-      return;
-    }
-    const players = JSON.parse(data.playersJSON || '{}');
-    // Find first empty seat
-    let seat = -1;
-    for (let i = 0; i < MAX_PLAYERS; i++) {
-      if (!players[i] || players[i].isEmpty) { seat = i; break; }
-    }
-    if (seat === -1) {
-      el('lobbyError').textContent = 'Room is full (4 players).';
-      return;
-    }
-
-    mySeat = seat;
-    amHost = false;
-
-    // Write ourselves into the seat
-    players[seat] = freshPlayer(myName, false);
-    data.playersJSON = JSON.stringify(players);
-    roomRef.put(data);
-
-    el('lobbyError').textContent = '';
-    subscribeToRoom();
-    showView('waiting');
-    el('displayRoomCode').textContent = myRoomCode;
-    el('tableRoomCode').textContent = myRoomCode;
+    peer.destroy();
+    peer = null;
+    myRoomCode = '';
   });
 }
 
@@ -291,8 +314,7 @@ function joinRoom() {
    State helpers
 ───────────────────────────────────────────── */
 function buildFreshRoomState(code) {
-  // Returns the *parsed* state format (real JS objects).
-  // pushState() serialises it into the flat Gun wire format when writing.
+  // Returns the full state object that is broadcast directly via PeerJS.
   return {
     roomCode: code,
     phase: 'waiting',       // waiting | pre-flop | flop | turn | river | showdown
@@ -326,66 +348,127 @@ function freshPlayer(name, isAI) {
   };
 }
 
-/** Push full state to Gun */
+/** Broadcast state to all connected peers (host only) and update local state */
 function pushState(gs) {
-  if (!roomRef) return;
   localState = gs;
-  const flat = {
-    roomCode: gs.roomCode,
-    phase: gs.phase,
-    round: gs.round,
-    dealer: gs.dealer,
-    currentPlayer: gs.currentPlayer,
-    currentBet: gs.currentBet,
-    pot: gs.pot,
-    playersJSON: JSON.stringify(gs.players),
-    communityJSON: JSON.stringify(gs.communityCards),
-    deckJSON: JSON.stringify(gs.deck),
-    hostSeat: gs.hostSeat,
-    lastAction: gs.lastAction || '',
-    winnerInfo: gs.winnerInfo || '',
-    updatedAt: Date.now(),
-  };
-  roomRef.put(flat);
-}
-
-/** Parse Gun flat data into usable state object */
-function parseState(data) {
-  if (!data) return null;
-  return {
-    roomCode:       data.roomCode,
-    phase:          data.phase,
-    round:          data.round || 0,
-    dealer:         data.dealer || 0,
-    currentPlayer:  data.currentPlayer,
-    currentBet:     data.currentBet || 0,
-    pot:            data.pot || 0,
-    players:        safeParseJSON(data.playersJSON, {}),
-    communityCards: safeParseJSON(data.communityJSON, []),
-    deck:           safeParseJSON(data.deckJSON, []),
-    hostSeat:       data.hostSeat || 0,
-    lastAction:     data.lastAction || '',
-    winnerInfo:     data.winnerInfo || '',
-    updatedAt:      data.updatedAt || 0,
-  };
-}
-
-function safeParseJSON(s, fallback) {
-  try { return JSON.parse(s); } catch { return fallback; }
+  if (amHost) {
+    broadcastToPeers({ type: 'state', state: gs });
+  }
 }
 
 /* ─────────────────────────────────────────────
-   Subscribe to room updates
+   PeerJS host: handle incoming peer connections
 ───────────────────────────────────────────── */
-function subscribeToRoom() {
-  if (!roomRef) return;
-  roomRef.on(data => {
-    const gs = parseState(data);
-    if (!gs) return;
-    localState = gs;
-    onStateChange(gs);
+function handleNewPeerConnection(conn) {
+  conn.on('data', msg => {
+    if (msg.type === 'join') {
+      if (!localState) { conn.send({ type: 'error', message: 'Room not ready.' }); conn.close(); return; }
+      if (localState.phase !== 'waiting') {
+        conn.send({ type: 'error', message: 'Game already in progress.' });
+        conn.close(); return;
+      }
+      // Ignore duplicate join requests from an already-registered connection
+      if (connSeatMap.has(conn)) return;
+      const players = localState.players;
+      let seat = -1;
+      for (let i = 0; i < MAX_PLAYERS; i++) {
+        if (!players[i] || players[i].isEmpty) { seat = i; break; }
+      }
+      if (seat === -1) {
+        conn.send({ type: 'error', message: 'Room is full (4 players).' });
+        conn.close(); return;
+      }
+      connSeatMap.set(conn, seat);
+      peerConns.push(conn);
+      players[seat] = freshPlayer(msg.name, false);
+      // Confirm seat + current state to new peer, then broadcast to existing peers
+      conn.send({ type: 'joined', seat, state: localState });
+      broadcastToPeers({ type: 'state', state: localState }, conn);
+      onStateChange(localState);
+
+    } else if (msg.type === 'action') {
+      // Only apply the action if it comes from the peer that owns that seat
+      const assignedSeat = connSeatMap.get(conn);
+      if (localState && assignedSeat !== undefined && msg.seat === assignedSeat) {
+        applyAction(localState, msg.seat, msg.action, msg.amount || 0);
+      }
+
+    } else if (msg.type === 'leave') {
+      handlePeerDisconnect(conn);
+    }
   });
+
+  conn.on('close', () => handlePeerDisconnect(conn));
+  conn.on('error', () => handlePeerDisconnect(conn));
 }
+
+function handlePeerDisconnect(conn) {
+  peerConns = peerConns.filter(c => c !== conn);
+  const seat = connSeatMap.get(conn);
+  connSeatMap.delete(conn);
+  if (!localState || seat === undefined) return;
+  if (localState.phase === 'waiting') {
+    delete localState.players[seat];
+  } else if (localState.players[seat]) {
+    localState.players[seat].disconnected = true;
+    localState.players[seat].isAI = true;
+  }
+  broadcastToPeers({ type: 'state', state: localState });
+  onStateChange(localState);
+}
+
+/** Send a message to all connected peers, optionally excluding one connection */
+function broadcastToPeers(msg, excludeConn = null) {
+  for (const conn of peerConns) {
+    if (conn !== excludeConn) {
+      try {
+        if (conn.open) conn.send(msg);
+      } catch (err) {
+        console.warn('Failed to send to peer:', err);
+      }
+    }
+  }
+}
+
+/* ─────────────────────────────────────────────
+   PeerJS peer: handle messages from the host
+───────────────────────────────────────────── */
+function handleHostMessage(msg) {
+  if (msg.type === 'joined') {
+    mySeat = msg.seat;
+    localState = msg.state;
+    el('lobbyError').textContent = '';
+    showView('waiting');
+    el('displayRoomCode').textContent = myRoomCode;
+    el('tableRoomCode').textContent = myRoomCode;
+    setInviteLink(myRoomCode);
+    updateWaitingRoom(localState);
+  } else if (msg.type === 'state') {
+    localState = msg.state;
+    onStateChange(localState);
+  } else if (msg.type === 'error') {
+    el('lobbyError').textContent = msg.message;
+    peer?.destroy();
+    peer = null;
+    hostConn = null;
+    myRoomCode = '';
+    mySeat = -1;
+  }
+}
+
+/** Route player action: host applies directly; peer sends to host */
+function playerAction(action, amount = 0) {
+  if (!localState) return;
+  if (amHost) {
+    applyAction(localState, mySeat, action, amount);
+  } else if (hostConn && hostConn.open) {
+    hostConn.send({ type: 'action', seat: mySeat, action, amount });
+  }
+}
+
+/* ─────────────────────────────────────────────
+   State change handler
+───────────────────────────────────────────── */
 
 function onStateChange(gs) {
   if (gs.phase === 'waiting') {
@@ -885,43 +968,44 @@ function leaveGame() {
     // Remove from players list
     if (gs.players[mySeat]) {
       gs.players[mySeat] = { ...gs.players[mySeat], isEmpty: true, active: false };
-      gs.playersJSON = JSON.stringify(gs.players);
-      pushState(gs);
     }
   } else {
     // Mark as disconnected — AI takes over
     if (gs.players[mySeat]) {
       gs.players[mySeat].disconnected = true;
       gs.players[mySeat].isAI = true;
-      pushState(gs);
     }
-    // If we were host, transfer host to next human player
-    if (amHost) transferHost(gs);
+  }
+
+  if (amHost) {
+    // Let peers know about the updated state before we disconnect
+    broadcastToPeers({ type: 'state', state: gs });
+  } else if (hostConn && hostConn.open) {
+    hostConn.send({ type: 'leave' });
   }
   goToLobby();
 }
 
-function transferHost(gs) {
-  for (let i = 0; i < MAX_PLAYERS; i++) {
-    if (i !== mySeat && gs.players[i] && !gs.players[i].isAI && !gs.players[i].disconnected) {
-      gs.hostSeat = i;
-      pushState(gs);
-      return;
-    }
-  }
-}
-
 function goToLobby() {
-  roomRef?.off();
   clearTimeout(aiTurnTimeout);
-  clearInterval(hostHeartbeatInterval);
-  mySeat = -1; myRoomCode = ''; amHost = false; localState = null; roomRef = null;
+  // Nullify state before destroying so async close-handlers are no-ops
+  const p = peer;
+  peer = null;
+  hostConn = null;
+  peerConns = [];
+  connSeatMap.clear();
+  mySeat = -1; myRoomCode = ''; amHost = false; localState = null;
+  p?.destroy();
   showView('lobby');
 }
 
 /* ─────────────────────────────────────────────
    Utility
 ───────────────────────────────────────────── */
+function safeParseJSON(s, fallback) {
+  try { return JSON.parse(s); } catch { return fallback; }
+}
+
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -930,8 +1014,6 @@ function escHtml(s) {
    Wire up DOM events
 ───────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
-  initGun();
-
   // Lobby
   el('btnNew')?.addEventListener('click', createRoom);
   el('btnJoin')?.addEventListener('click', () => {
@@ -958,21 +1040,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { el('btnCopyLink').textContent = '🔗 Copy link'; }, 2000);
   });
 
-  // Game actions
-  el('btnFold')?.addEventListener('click', () => {
-    if (localState) applyAction(localState, mySeat, 'fold');
-  });
-  el('btnCheck')?.addEventListener('click', () => {
-    if (localState) applyAction(localState, mySeat, 'check');
-  });
-  el('btnCall')?.addEventListener('click', () => {
-    if (localState) applyAction(localState, mySeat, 'call');
-  });
+  // Game actions — routed via playerAction() so non-host peers send to host
+  el('btnFold')?.addEventListener('click', () => playerAction('fold'));
+  el('btnCheck')?.addEventListener('click', () => playerAction('check'));
+  el('btnCall')?.addEventListener('click', () => playerAction('call'));
   el('btnRaise')?.addEventListener('click', () => {
-    if (!localState) return;
     const amt = parseInt(el('raiseAmount')?.value || '0', 10);
     if (isNaN(amt) || amt <= 0) return;
-    applyAction(localState, mySeat, 'raise', amt);
+    playerAction('raise', amt);
   });
   el('btnLeaveGame')?.addEventListener('click', () => {
     if (confirm('Drop out? The computer will take over your seat.')) leaveGame();
