@@ -1,13 +1,13 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 ---
-<Layout title="Poker" description="Texas Hold'em Poker — up to 4 players, Computer fills empty seats">
+<Layout title="Poker" description="Texas Hold'em Poker — 2 to 4 human players, no computers">
   <div id="app" style="max-width:1100px;margin:0 auto;padding:1rem 1rem 3rem;">
 
     <!-- ══ LOBBY ══ -->
     <section id="lobby" style="max-width:460px;margin:3rem auto;">
       <h1 style="text-align:center;font-size:2rem;margin-bottom:.25rem;">🃏 Poker</h1>
-      <p style="text-align:center;color:rgba(255,255,255,.65);margin-bottom:2rem;">Texas Hold'em · up to 4 players · Computer fills empty seats</p>
+      <p style="text-align:center;color:rgba(255,255,255,.65);margin-bottom:2rem;">Texas Hold'em · 2–4 human players · no computers</p>
 
       <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);">
         <div style="margin-bottom:1rem;">
@@ -41,7 +41,7 @@ import Layout from '../../layouts/Layout.astro';
       <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);">
         <h2 style="margin-bottom:.25rem;">Waiting Room</h2>
         <p style="color:rgba(255,255,255,.6);font-size:.875rem;margin-bottom:1rem;">
-          Share the invite link (or the room code) with friends — they paste it in the Join box below and you're all at the same table. Computer fills any empty seats when you start.
+          Share the invite link (or the room code) with friends — they paste it in the Join box below and you're all at the same table. Need at least 2 players to start (up to 4).
         </p>
 
         <!-- Room code row -->
@@ -136,7 +136,7 @@ import Layout from '../../layouts/Layout.astro';
 
 <!-- PeerJS — WebRTC-based direct peer-to-peer connections (used by @boardgame.io/p2p) -->
 <script is:inline src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<!-- QR code generation for mobile invite -->
-<script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- QR code generation for mobile invite (hosted locally for reliability) -->
+<script is:inline src="/games/qrcode.min.js"></script>
 <!-- Poker game logic -->
 <script is:inline src="/games/poker-game.js"></script>
