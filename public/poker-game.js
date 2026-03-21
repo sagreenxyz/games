@@ -559,6 +559,7 @@ function startGame(gs) {
   dealHands(newGs);
   postBlinds(newGs);
   pushState(newGs);
+  onStateChange(newGs);
 }
 
 function dealHands(gs) {
