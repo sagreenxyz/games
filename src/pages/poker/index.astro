@@ -41,12 +41,21 @@ import Layout from '../../layouts/Layout.astro';
       <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);">
         <h2 style="margin-bottom:.25rem;">Waiting Room</h2>
         <p style="color:rgba(255,255,255,.6);font-size:.875rem;margin-bottom:1rem;">
-          Share the room code so friends can join. AI fills empty seats when the game starts.
+          Share the invite link (or the room code) with friends — they paste it in the Join box below and you're all at the same table. AI fills any empty seats when you start.
         </p>
-        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.2);border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem;">
+
+        <!-- Room code row -->
+        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.2);border-radius:8px;padding:.75rem 1rem;margin-bottom:.6rem;">
           <span style="font-size:.875rem;color:rgba(255,255,255,.6);">Room code:</span>
           <strong id="displayRoomCode" style="font-size:1.4rem;letter-spacing:.15em;color:var(--gold);font-family:monospace;"></strong>
-          <button id="btnCopyCode" class="btn btn-sm btn-outline" style="margin-left:auto;">📋 Copy</button>
+          <button id="btnCopyCode" class="btn btn-sm btn-outline" style="margin-left:auto;">📋 Copy code</button>
+        </div>
+
+        <!-- Invite-link row -->
+        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.15);border-radius:8px;padding:.6rem 1rem;margin-bottom:1.25rem;">
+          <span style="font-size:.8rem;color:rgba(255,255,255,.5);white-space:nowrap;">Invite link:</span>
+          <code id="inviteLink" style="font-size:.78rem;color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></code>
+          <button id="btnCopyLink" class="btn btn-sm btn-outline" style="white-space:nowrap;">🔗 Copy link</button>
         </div>
 
         <div id="playerSlots" style="display:grid;gap:.5rem;margin-bottom:1.25rem;"></div>
@@ -119,7 +128,9 @@ import Layout from '../../layouts/Layout.astro';
   </div>
 </Layout>
 
-<!-- Gun.js for real-time sync -->
+<!-- Gun.js for real-time P2P sync -->
 <script is:inline src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<!-- WebRTC transport — enables direct browser-to-browser connections (no relay needed on LAN) -->
+<script is:inline src="https://cdn.jsdelivr.net/npm/gun/lib/webrtc.js"></script>
 <!-- Poker game logic -->
 <script is:inline src="/games/poker-game.js"></script>
