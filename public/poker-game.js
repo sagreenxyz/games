@@ -295,6 +295,7 @@ function buildFreshRoomState(code) {
     hostSeat: 0,
     lastAction: '',
     winnerInfo: '',
+    streetActed: [],        // seats that have voluntarily acted this betting street
     updatedAt: Date.now(),
   };
 }
@@ -525,6 +526,7 @@ function startGame(gs) {
     currentPlayer: -1,
     lastAction: '',
     winnerInfo: '',
+    streetActed: [],
   };
 
   dealHands(newGs);
@@ -593,6 +595,7 @@ function nextPhase(gs) {
     if (p) p.bet = 0;
   }
   gs.currentBet = 0;
+  gs.streetActed = [];
   gs.phase = next;
 
   if (next === 'flop') {
@@ -689,6 +692,7 @@ function startNewRound(gs) {
   gs.deck = makeDeck();
   gs.pot = 0;
   gs.currentBet = 0;
+  gs.streetActed = [];
   gs.phase = 'pre-flop';
   gs.round = (gs.round || 0) + 1;
   gs.winnerInfo = '';
@@ -721,12 +725,13 @@ function activeSeatOrder(gs) {
 /**
  * Returns true when the current betting street is over.
  *
- * Current implementation: all active (non-folded, non-all-in) players have
- * matched currentBet. This is sufficient for 2-player games but has two known
- * limitations in 3+ player games:
- *   1. All-check on a new street resolves immediately (all bets start at 0).
- *   2. The Big Blind does not receive their pre-flop option if everyone called.
- * See CONTRIBUTING.md § Known Issues for the planned fix (gs.streetActed).
+ * A street is over when every active (non-folded, non-all-in) player has
+ * voluntarily acted at least once since the street began or since the last
+ * raise, AND all their bets match gs.currentBet.
+ *
+ * gs.streetActed tracks the seats that have acted this street.  It is reset
+ * to [] at the start of each new street and to [raiser] whenever someone
+ * raises, ensuring every other player must respond before the round closes.
  * @param {object} gs - game state
  * @returns {boolean}
  */
@@ -735,8 +740,9 @@ function isBettingRoundOver(gs) {
     .map(Number)
     .filter(i => gs.players[i] && gs.players[i].active && !gs.players[i].folded && !gs.players[i].allIn);
   if (active.length <= 1) return true;
-  // Everyone has matched currentBet
-  return active.every(i => gs.players[i].bet === gs.currentBet);
+  const acted = gs.streetActed || [];
+  // Every active player must have acted AND matched the current bet
+  return active.every(i => acted.includes(i) && gs.players[i].bet === gs.currentBet);
 }
 
 /**
@@ -777,6 +783,9 @@ function applyAction(gs, seat, action, amount = 0) {
   if (!p) return;
   let label = '';
 
+  // Capture current bet level before the action so we can detect a raise
+  const prevCurrentBet = gs.currentBet;
+
   switch (action) {
     case 'fold':
       p.folded = true;
@@ -815,6 +824,20 @@ function applyAction(gs, seat, action, amount = 0) {
   }
 
   gs.lastAction = label;
+
+  // Track which players have voluntarily acted this street.
+  // When the current bet was raised, reset the acted set to only the raiser
+  // so all other players must respond; otherwise just record this seat.
+  // Folds are excluded because the folded player leaves the active pool and
+  // isBettingRoundOver() already filters them out.  All-in players ARE added
+  // when they don't raise (they've acted, and isBettingRoundOver() filters
+  // them out of the "still-to-act" check regardless).
+  if (!gs.streetActed) gs.streetActed = [];
+  if (gs.currentBet > prevCurrentBet) {
+    gs.streetActed = [seat];
+  } else if (action !== 'fold' && !gs.streetActed.includes(seat)) {
+    gs.streetActed.push(seat);
+  }
 
   // Check if only one player remains
   const remaining = Object.keys(gs.players)
