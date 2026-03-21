@@ -255,7 +255,7 @@ function tryOpenHostPeer() {
   });
 }
 
-/** Build and display the shareable invite URL */
+/** Build and display the shareable invite URL and QR code */
 function setInviteLink(code) {
   const url = new URL(window.location.pathname, window.location.origin);
   url.searchParams.set('room', code);
@@ -264,6 +264,12 @@ function setInviteLink(code) {
   if (linkEl) linkEl.textContent = href;
   // Store so copy-link button can use it
   el('btnCopyLink')?.setAttribute('data-href', href);
+  // Render QR code so mobile users can scan to join
+  const qrContainer = el('qrCodeContainer');
+  if (qrContainer && typeof QRCode !== 'undefined') {
+    qrContainer.replaceChildren();
+    new QRCode(qrContainer, { text: href, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
+  }
 }
 
 function joinRoom() {

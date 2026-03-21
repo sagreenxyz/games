@@ -52,10 +52,16 @@ import Layout from '../../layouts/Layout.astro';
         </div>
 
         <!-- Invite-link row -->
-        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.15);border-radius:8px;padding:.6rem 1rem;margin-bottom:1.25rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.15);border-radius:8px;padding:.6rem 1rem;margin-bottom:.75rem;">
           <span style="font-size:.8rem;color:rgba(255,255,255,.5);white-space:nowrap;">Invite link:</span>
           <code id="inviteLink" style="font-size:.78rem;color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></code>
           <button id="btnCopyLink" class="btn btn-sm btn-outline" style="white-space:nowrap;">🔗 Copy link</button>
+        </div>
+
+        <!-- QR code row -->
+        <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.15);border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem;">
+          <span style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:.5rem;">📱 Scan to join on mobile</span>
+          <div id="qrCodeContainer" style="background:#fff;padding:8px;border-radius:6px;display:inline-block;"></div>
         </div>
 
         <div id="playerSlots" style="display:grid;gap:.5rem;margin-bottom:1.25rem;"></div>
@@ -130,5 +136,7 @@ import Layout from '../../layouts/Layout.astro';
 
 <!-- PeerJS — WebRTC-based direct peer-to-peer connections (used by @boardgame.io/p2p) -->
 <script is:inline src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- QR code generation for mobile invite -->
+<script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <!-- Poker game logic -->
 <script is:inline src="/games/poker-game.js"></script>
