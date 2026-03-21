@@ -1141,6 +1141,15 @@ function goToLobby() {
   connSeatMap.clear();
   mySeat = -1; myRoomCode = ''; amHost = false; localState = null;
   p?.destroy();
+  // Restore full lobby UI (in case we hid elements for a ?room= direct link)
+  show('btnNew');
+  show('btnJoin');
+  el('joinFields')?.classList.add('hidden');
+  if (el('lobbyError')) el('lobbyError').textContent = '';
+  // Remove the room param from the URL so the full lobby shows on next load
+  if (window.location.search) {
+    history.replaceState({}, '', window.location.pathname);
+  }
   showView('lobby');
 }
 
@@ -1219,6 +1228,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (rc) {
       rc.value = urlCode.toUpperCase();
       el('joinFields')?.classList.remove('hidden');
+      // Hide "New Room" and the "Join Room" toggle since we're joining a specific room
+      hide('btnNew');
+      hide('btnJoin');
     }
   }
 });
