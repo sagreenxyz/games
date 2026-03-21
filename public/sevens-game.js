@@ -43,6 +43,9 @@ let amHost     = false;
 /** Current view: 'lobby' | 'waiting' | 'game' */
 let view = 'lobby';
 
+/** Whether the player has requested a hint this turn */
+let hintActive = false;
+
 function peerConfig() { return window.PEER_CONFIG || {}; }
 
 /* ─────────────────────────────────────────────
@@ -623,29 +626,47 @@ function renderActionLog(gs) {
 /* ─────────────────────────────────────────────
    Render board
 ───────────────────────────────────────────── */
+function boardCardHTML(rank, suit, played, is7) {
+  if (!played) {
+    // Empty placeholder slot
+    return `<div style="display:inline-flex;flex-direction:column;justify-content:space-between;
+      width:42px;height:60px;border-radius:6px;border:1px dashed rgba(255,255,255,.18);
+      background:rgba(255,255,255,.04);padding:3px 4px;font-size:.7rem;font-weight:700;
+      color:rgba(255,255,255,.2);user-select:none;">
+      <span>${rank}</span>
+      <span style="font-size:1rem;text-align:center;">${suit}</span>
+      <span aria-hidden="true" style="align-self:flex-end;transform:rotate(180deg);">${rank}</span>
+    </div>`;
+  }
+  const isRed = RED_SUITS_S.has(suit);
+  const color = isRed ? 'var(--red)' : 'var(--black)';
+  const bg    = is7 ? 'var(--gold)' : 'var(--card-bg)';
+  const brd   = is7 ? '2px solid var(--gold-dark)' : '1px solid #ccc';
+  return `<div style="display:inline-flex;flex-direction:column;justify-content:space-between;
+    width:42px;height:60px;border-radius:6px;border:${brd};
+    background:${bg};padding:3px 4px;font-size:.7rem;font-weight:700;
+    color:${color};box-shadow:1px 1px 4px rgba(0,0,0,.3);user-select:none;">
+    <span>${rank}</span>
+    <span style="font-size:1rem;text-align:center;">${suit}</span>
+    <span aria-hidden="true" style="align-self:flex-end;transform:rotate(180deg);">${rank}</span>
+  </div>`;
+}
+
 function renderBoard(board) {
   const rows = SUITS_S.map(suit => {
     const col = board[suit];
     const isRed = RED_SUITS_S.has(suit);
-    const colorStyle = isRed ? 'color:var(--red)' : 'color:var(--black)';
 
     let cells = '';
     for (const rank of RANKS_S) {
-      const val = RANK_VAL_S[rank];
+      const val    = RANK_VAL_S[rank];
       const played = col !== null && val >= col.min && val <= col.max;
       const is7    = val === 7;
-      const bg     = played
-        ? (is7 ? 'background:var(--gold);color:var(--black);font-weight:700;' : 'background:var(--card-bg);')
-        : 'background:rgba(255,255,255,.08);color:rgba(255,255,255,.3);';
-      cells += `<div style="display:inline-flex;align-items:center;justify-content:center;
-        width:36px;height:50px;border-radius:5px;font-size:.8rem;font-weight:600;
-        border:1px solid rgba(255,255,255,.15);${bg}${played && !is7 ? colorStyle : ''}">
-        ${rank}
-      </div>`;
+      cells += boardCardHTML(rank, suit, played, is7);
     }
-    return `<div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;">
-      <span style="width:1.8rem;font-size:1.2rem;${isRed ? 'color:var(--red)' : 'color:#fff'}">${suit}</span>
-      <div style="display:flex;gap:.25rem;flex-wrap:wrap;">${cells}</div>
+    return `<div style="display:flex;align-items:center;gap:.25rem;flex-wrap:wrap;">
+      <span style="width:1.5rem;font-size:1.1rem;${isRed ? 'color:var(--red)' : 'color:#fff'};flex-shrink:0;">${suit}</span>
+      <div style="display:flex;gap:.2rem;flex-wrap:wrap;">${cells}</div>
     </div>`;
   }).join('');
   setHTML('boardRows', rows);
@@ -682,6 +703,9 @@ function renderGame(gs) {
     const validMoves = isFinished ? [] : getValidMoves(gs.board, myHand);
     const isMyTurn   = gs.currentPlayer === mySeat;
 
+    // Reset hint when turn changes
+    if (!isMyTurn) hintActive = false;
+
     // Status badge
     let badge = '';
     if (me.finished)          badge = '<span class="badge badge-gold">Finished</span>';
@@ -694,23 +718,36 @@ function renderGame(gs) {
       setHTML('myCards', myHand.map(card => {
         const isValid = validMoves.some(v => v.r === card.r && v.s === card.s);
         const clickable = isMyTurn && !isFinished;
-        return cardHTML(card, { clickable, highlight: clickable && isValid });
+        return cardHTML(card, { clickable, highlight: clickable && isValid && hintActive });
       }).join(''));
     } else {
       setHTML('myCards', '<span style="color:rgba(255,255,255,.3);font-style:italic;">No cards — you\'re done!</span>');
     }
 
-    // Pass button
+    // Pass button and hint button
     const canPass   = isMyTurn && !isFinished && validMoves.length === 0;
     const mustPlay  = isMyTurn && !isFinished && validMoves.length > 0;
     el('btnPass').disabled = !canPass;
-    setText('actionMessage', isFinished
-      ? (gs.lastAction || '')
-      : isMyTurn
-        ? mustPlay ? 'Click a highlighted card to play it.' : 'No valid moves — click Pass.'
-        : (gs.players[gs.currentPlayer]
-          ? `Waiting for ${escHtml(gs.players[gs.currentPlayer].name)}…`
-          : ''));
+    const hintBtn = el('btnHint');
+    if (hintBtn) {
+      hintBtn.disabled = !mustPlay;
+      hintBtn.textContent = hintActive ? '💡 Hints On' : '💡 Hint';
+      hintBtn.style.outline = hintActive ? '2px solid #40916c' : '';
+    }
+    let actionMsg = '';
+    if (isFinished) {
+      actionMsg = gs.lastAction || '';
+    } else if (isMyTurn) {
+      if (mustPlay) {
+        actionMsg = hintActive ? 'Click a highlighted card to play it.' : 'Click a card to play it, or use Hint to see valid moves.';
+      } else {
+        actionMsg = 'No valid moves — click Pass.';
+      }
+    } else {
+      actionMsg = gs.players[gs.currentPlayer]
+        ? `Waiting for ${escHtml(gs.players[gs.currentPlayer].name)}…` : '';
+    }
+    setText('actionMessage', actionMsg);
   }
 
   // Opponents
@@ -813,11 +850,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const hand  = safeParseJSON(localState.players[mySeat]?.handJSON, []);
     const valid = getValidMoves(localState.board, hand);
     if (!valid.some(v => v.r === c.r && v.s === c.s)) return;
+    hintActive = false;
     playerAction('play', c);
   });
 
   // Pass
-  el('btnPass')?.addEventListener('click', () => { playerAction('pass', null); });
+  el('btnPass')?.addEventListener('click', () => { hintActive = false; playerAction('pass', null); });
+
+  // Hint
+  el('btnHint')?.addEventListener('click', () => {
+    hintActive = !hintActive;
+    if (localState) renderGame(localState);
+  });
 
   // Leave game
   el('btnLeaveGame')?.addEventListener('click', () => {
