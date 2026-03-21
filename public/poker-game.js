@@ -313,11 +313,14 @@ function freshPlayer(name) {
   };
 }
 
-/** Broadcast state to all connected peers (host only) and update local state */
+/** Broadcast state to all connected peers (host only), update local state,
+ *  and refresh the host's own UI so both paths (host action and peer action)
+ *  always re-render without a separate onStateChange() call at each call-site. */
 function pushState(gs) {
   localState = gs;
   if (amHost) {
     broadcastToPeers({ type: 'state', state: gs });
+    onStateChange(gs);
   }
 }
 
@@ -433,7 +436,8 @@ function playerAction(action, amount = 0) {
   if (!localState) return;
   if (amHost) {
     applyAction(localState, mySeat, action, amount);
-    onStateChange(localState);
+    // The host's UI is refreshed inside pushState(), which applyAction() calls
+    // for every code path, so no separate onStateChange() call is needed here.
   } else if (hostConn && hostConn.open) {
     hostConn.send({ type: 'action', seat: mySeat, action, amount });
   }
@@ -526,7 +530,7 @@ function startGame(gs) {
   dealHands(newGs);
   postBlinds(newGs);
   pushState(newGs);
-  onStateChange(newGs);
+  // onStateChange is triggered by pushState() above
 }
 
 function dealHands(gs) {
@@ -543,14 +547,27 @@ function dealHands(gs) {
 function postBlinds(gs) {
   const seats = activeSeatOrder(gs);
   if (seats.length < 2) return;
-  const sbSeat = seats[1 % seats.length]; // seat after dealer
-  const bbSeat = seats[2 % seats.length];
+
+  let sbSeat, bbSeat;
+  if (seats.length === 2) {
+    // Heads-up: dealer/button = SB (last in activeSeatOrder) and acts first pre-flop
+    sbSeat = seats[1];
+    bbSeat = seats[0];
+  } else {
+    // 3+ players: SB = first seat after dealer, BB = second seat after dealer
+    sbSeat = seats[0];
+    bbSeat = seats[1];
+  }
 
   placeBet(gs, sbSeat, SMALL_BLIND);
   placeBet(gs, bbSeat, BIG_BLIND);
   gs.currentBet = BIG_BLIND;
-  // First to act after blinds
-  gs.currentPlayer = seats[3 % seats.length] ?? seats[0];
+  // Pre-flop: first to act is seat after BB (or SB for heads-up)
+  if (seats.length === 2) {
+    gs.currentPlayer = seats[1]; // SB/dealer acts first heads-up
+  } else {
+    gs.currentPlayer = seats[2 % seats.length]; // UTG: player after BB
+  }
 }
 
 function placeBet(gs, seat, amount) {
@@ -652,7 +669,13 @@ function startNewRound(gs) {
     p.handJSON = JSON.stringify([]);
   }
 
-  gs.dealer = (gs.dealer + 1) % MAX_PLAYERS;
+  // Advance dealer to the next occupied seat
+  let nextDealer = (gs.dealer + 1) % MAX_PLAYERS;
+  let safety = MAX_PLAYERS;
+  while (!gs.players[nextDealer] && safety-- > 0) {
+    nextDealer = (nextDealer + 1) % MAX_PLAYERS;
+  }
+  gs.dealer = nextDealer;
   gs.communityCards = [];
   gs.deck = makeDeck();
   gs.pot = 0;
@@ -891,7 +914,12 @@ function renderGame(gs) {
     setHTML('turnIndicator', gs.winnerInfo
       ? `<span style="color:var(--gold);">${escHtml(gs.winnerInfo)}</span><br/><span style="font-size:.8rem;color:rgba(255,255,255,.4);">Next round starting soon…</span>`
       : '');
-    setHTML('actionButtons', '');
+    // Disable (but do not remove) the action buttons so they remain in the DOM
+    // and can be re-enabled when the next round begins.
+    ['btnFold', 'btnCheck', 'btnCall', 'btnRaise'].forEach(id => {
+      const btn = el(id);
+      if (btn) btn.disabled = true;
+    });
   } else if (isMyTurn && !myFolded && !myAllIn) {
     const toCall = Math.max(0, gs.currentBet - (myPlayer?.bet || 0));
     const canCheck = toCall === 0;

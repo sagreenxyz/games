@@ -10,9 +10,16 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui"
   },
   "dependencies": {
     "astro": "^6.0.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5"
   }
 }
