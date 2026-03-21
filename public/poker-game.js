@@ -23,6 +23,12 @@ const STARTING_CHIPS = 1000;
 const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
 
+const PHASE_LABELS = {
+  'pre-flop': 'Pre-Flop', flop: 'Flop', turn: 'Turn',
+  river: 'River', showdown: 'Showdown',
+};
+function phaseLabel(p) { return PHASE_LABELS[p] || p; }
+
 /** Build and shuffle a 52-card deck */
 function makeDeck() {
   const d = [];
@@ -610,7 +616,7 @@ function postBlinds(gs) {
   placeBet(gs, sbSeat, SMALL_BLIND);
   placeBet(gs, bbSeat, BIG_BLIND);
   gs.currentBet = BIG_BLIND;
-  if (!gs.actionLog) gs.actionLog = [];
+  gs.actionLog ??= [];
   gs.actionLog.push(`${gs.players[sbSeat].name} posts SB (${SMALL_BLIND})`);
   gs.actionLog.push(`${gs.players[bbSeat].name} posts BB (${BIG_BLIND})`);
   // Pre-flop: first to act is seat after BB (or SB for heads-up)
@@ -646,7 +652,7 @@ function nextPhase(gs) {
   gs.currentBet = 0;
   gs.streetActed = [];
   gs.phase = next;
-  if (!gs.actionLog) gs.actionLog = [];
+  gs.actionLog ??= [];
   gs.actionLog.push(`--- ${phaseLabel(next)} ---`);
 
   if (next === 'flop') {
@@ -703,7 +709,7 @@ function resolveShowdown(gs) {
     return evalHand([...hand, ...gs.communityCards]).name;
   })();
   gs.winnerInfo = `🏆 ${winNames} wins ${gs.pot} chips with ${winHand}!`;
-  if (!gs.actionLog) gs.actionLog = [];
+  gs.actionLog ??= [];
   gs.actionLog.push(gs.winnerInfo);
   gs.pot = 0;
   gs.phase = 'showdown';
@@ -752,7 +758,7 @@ function startNewRound(gs) {
   gs.round = (gs.round || 0) + 1;
   gs.winnerInfo = '';
   gs.lastAction = '';
-  if (!gs.actionLog) gs.actionLog = [];
+  gs.actionLog ??= [];
   gs.actionLog.push(`--- Round ${gs.round} ---`);
 
   dealHands(gs);
@@ -882,7 +888,7 @@ function applyAction(gs, seat, action, amount = 0) {
 
   gs.lastAction = label;
   if (label) {
-    if (!gs.actionLog) gs.actionLog = [];
+    gs.actionLog ??= [];
     gs.actionLog.push(label);
   }
 
@@ -909,7 +915,7 @@ function applyAction(gs, seat, action, amount = 0) {
     // This player wins by default
     gs.players[remaining[0]].chips += gs.pot;
     gs.winnerInfo = `🏆 ${gs.players[remaining[0]].name} wins ${gs.pot} chips (everyone else folded)!`;
-    if (!gs.actionLog) gs.actionLog = [];
+    gs.actionLog ??= [];
     gs.actionLog.push(gs.winnerInfo);
     gs.pot = 0;
     gs.phase = 'showdown';
@@ -963,12 +969,6 @@ function scheduleHostWork(gs) {
 /* ─────────────────────────────────────────────
    Render game state to DOM
 ───────────────────────────────────────────── */
-const PHASE_LABELS = {
-  'pre-flop': 'Pre-Flop', flop: 'Flop', turn: 'Turn',
-  river: 'River', showdown: 'Showdown'
-};
-function phaseLabel(p) { return PHASE_LABELS[p] || p; }
-
 function renderGame(gs) {
   const phase = gs.phase;
 
