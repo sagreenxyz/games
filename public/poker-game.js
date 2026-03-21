@@ -370,6 +370,14 @@ function handleNewPeerConnection(conn) {
       // Ignore duplicate join requests from an already-registered connection
       if (connSeatMap.has(conn)) return;
       const players = localState.players;
+      // Reject if the requested name is already taken (case-insensitive)
+      const nameTaken = Object.values(players).some(
+        p => p && !p.isEmpty && p.name.toLowerCase() === msg.name.toLowerCase()
+      );
+      if (nameTaken) {
+        conn.send({ type: 'error', message: `The name "${msg.name}" is already taken. Please choose a different name.` });
+        conn.close(); return;
+      }
       let seat = -1;
       for (let i = 0; i < MAX_PLAYERS; i++) {
         if (!players[i] || players[i].isEmpty) { seat = i; break; }
