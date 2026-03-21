@@ -124,3 +124,10 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 .badge-gold   { background: var(--gold); color: var(--black); }
 .badge-green  { background: var(--green-light); color: #fff; }
 .badge-gray   { background: var(--gray); color: #fff; }
+
+/* ── Sevens: opponent card display ── */
+.opp-cards-mobile { display: none; }
+@media (max-width: 600px) {
+  .opp-cards-desktop { display: none !important; }
+  .opp-cards-mobile  { display: block; }
+}
