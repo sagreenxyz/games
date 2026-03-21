@@ -715,7 +715,11 @@ function renderGame(gs) {
     setText('myCardCount', `${myHand.length} card${myHand.length !== 1 ? 's' : ''}`);
 
     if (myHand.length > 0) {
-      setHTML('myCards', myHand.map(card => {
+      const sortedHand = [...myHand].sort((a, b) => {
+        const suitDiff = SUITS_S.indexOf(a.s) - SUITS_S.indexOf(b.s);
+        return suitDiff !== 0 ? suitDiff : RANK_VAL_S[a.r] - RANK_VAL_S[b.r];
+      });
+      setHTML('myCards', sortedHand.map(card => {
         const isValid = validMoves.some(v => v.r === card.r && v.s === card.s);
         const clickable = isMyTurn && !isFinished;
         return cardHTML(card, { clickable, highlight: clickable && isValid && hintActive });
@@ -771,10 +775,11 @@ function renderGame(gs) {
         <strong>${escHtml(p.name)}</strong>${statusBadge}
         <span style="margin-left:auto;font-size:.85rem;color:rgba(255,255,255,.6);">${hand.length} 🃏</span>
       </div>
-      <div style="display:flex;gap:.3rem;flex-wrap:wrap;min-height:30px;align-items:center;">
+      <div class="opp-cards-desktop" style="display:flex;gap:.3rem;flex-wrap:wrap;min-height:30px;align-items:center;">
         ${hand.map(() => cardHTML(null, { faceDown: true })).slice(0, 5).join('')}
         ${hand.length > 5 ? `<span style="color:rgba(255,255,255,.4);font-size:.8rem;">+${hand.length - 5}</span>` : ''}
       </div>
+      <div class="opp-cards-mobile" style="font-size:.85rem;color:rgba(255,255,255,.55);">${hand.length} card${hand.length !== 1 ? 's' : ''} remaining</div>
       ${p.passCount ? `<div style="font-size:.75rem;color:rgba(255,255,255,.4);margin-top:.3rem;">Passed: ${p.passCount}×</div>` : ''}
     </div>`;
   }
