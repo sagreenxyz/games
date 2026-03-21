@@ -5,10 +5,10 @@
  * Architecture:
  *  - PeerJS creates a direct WebRTC data-channel between browsers
  *  - The "host" (first player) acts as the dealer:
- *      deals cards, advances phases, plays AI turns, broadcasts state
+ *      deals cards, advances phases, broadcasts state
  *  - Each player sees their own hand privately stored locally;
  *    opponents' hands are hidden until showdown
- *  - AI players fill empty / dropped seats automatically
+ *  - 2–4 human players required; no computer players
  */
 
 /* ─────────────────────────────────────────────
@@ -22,8 +22,6 @@ const MAX_PLAYERS = 4;
 const STARTING_CHIPS = 1000;
 const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
-
-const COMPUTER_NAMES = ['Computer-1', 'Computer-2', 'Computer-3', 'Computer-4'];
 
 /** Build and shuffle a 52-card deck */
 function makeDeck() {
@@ -115,44 +113,6 @@ function isStraight(sortedVals) {
 }
 
 /* ─────────────────────────────────────────────
-   AI decision engine
-───────────────────────────────────────────── */
-function aiDecide(gs, seatIndex) {
-  const player = gs.players[seatIndex];
-  const community = gs.communityCards || [];
-  const hand = player.hand || [];
-  const allCards = [...hand, ...community];
-  const handVal = evalHand(allCards);
-  const strength = handVal.rank / 9; // 0–1
-
-  const toCall = Math.max(0, gs.currentBet - (player.bet || 0));
-  const canCheck = toCall === 0;
-
-  // Bluff chance
-  const bluff = Math.random() < 0.12;
-  const aggression = 0.3 + strength * 0.6;
-
-  if (canCheck) {
-    if (strength > 0.55 || (bluff && Math.random() < aggression)) {
-      const raise = Math.min(
-        player.chips,
-        BIG_BLIND * (2 + Math.floor(Math.random() * 4))
-      );
-      if (raise >= BIG_BLIND && player.chips >= raise) return { action: 'raise', amount: raise };
-    }
-    return { action: 'check' };
-  } else {
-    if (strength < 0.2 && !bluff) return { action: 'fold' };
-    if (strength > 0.6 && player.chips > toCall + BIG_BLIND) {
-      const raise = Math.min(player.chips, toCall + BIG_BLIND * (1 + Math.floor(Math.random() * 3)));
-      return { action: 'raise', amount: raise };
-    }
-    if (toCall <= player.chips) return { action: 'call' };
-    return { action: 'fold' };
-  }
-}
-
-/* ─────────────────────────────────────────────
    Game state manager
 ───────────────────────────────────────────── */
 // PeerJS instances (replaced Gun.js)
@@ -169,7 +129,7 @@ let myName = '';
 let mySeat = -1;
 let myRoomCode = '';
 let amHost = false;
-let aiTurnTimeout = null;
+let disconnectedPlayerTimeout = null;
 
 /** Current view: 'lobby' | 'waiting' | 'game' */
 let view = 'lobby';
@@ -226,7 +186,7 @@ function tryOpenHostPeer() {
   peer.on('open', id => {
     myRoomCode = id;
     const initState = buildFreshRoomState(id);
-    initState.players[0] = freshPlayer(myName, false);
+    initState.players[0] = freshPlayer(myName);
     initState.hostSeat = 0;
     localState = initState;
 
@@ -339,7 +299,7 @@ function buildFreshRoomState(code) {
   };
 }
 
-function freshPlayer(name, isAI) {
+function freshPlayer(name) {
   return {
     name,
     chips: STARTING_CHIPS,
@@ -348,7 +308,6 @@ function freshPlayer(name, isAI) {
     folded: false,
     allIn: false,
     active: true,
-    isAI,
     isEmpty: false,
     disconnected: false,
   };
@@ -394,7 +353,7 @@ function handleNewPeerConnection(conn) {
       }
       connSeatMap.set(conn, seat);
       peerConns.push(conn);
-      players[seat] = freshPlayer(msg.name, false);
+      players[seat] = freshPlayer(msg.name);
       // Confirm seat + current state to new peer, then broadcast to existing peers
       conn.send({ type: 'joined', seat, state: localState });
       broadcastToPeers({ type: 'state', state: localState }, conn);
@@ -425,7 +384,6 @@ function handlePeerDisconnect(conn) {
     delete localState.players[seat];
   } else if (localState.players[seat]) {
     localState.players[seat].disconnected = true;
-    localState.players[seat].isAI = true;
   }
   broadcastToPeers({ type: 'state', state: localState });
   onStateChange(localState);
@@ -475,6 +433,7 @@ function playerAction(action, amount = 0) {
   if (!localState) return;
   if (amHost) {
     applyAction(localState, mySeat, action, amount);
+    onStateChange(localState);
   } else if (hostConn && hostConn.open) {
     hostConn.send({ type: 'action', seat: mySeat, action, amount });
   }
@@ -513,22 +472,22 @@ function updateWaitingRoom(gs) {
       </div>`;
     } else {
       html += `<div style="display:flex;align-items:center;gap:.5rem;background:rgba(0,0,0,.1);padding:.6rem .9rem;border-radius:8px;opacity:.5;">
-        <span style="color:rgba(255,255,255,.4);">Seat ${i + 1}: empty (Computer will fill)</span>
+        <span style="color:rgba(255,255,255,.4);">Seat ${i + 1}: empty — waiting for a player to join</span>
       </div>`;
     }
   }
   setHTML('playerSlots', html);
 
-  // Show start button only to host
-  const humanCount = Object.values(players).filter(p => p && !p.isEmpty && !p.isAI).length;
-  if (amHost && humanCount >= 1) {
+  // Show start button only to host when at least 2 human players are present
+  const humanCount = Object.values(players).filter(p => p && !p.isEmpty).length;
+  if (amHost && humanCount >= 2) {
     show('btnStart');
     el('btnStart').disabled = false;
   } else {
     hide('btnStart');
   }
   setText('waitingMsg', amHost
-    ? 'Start whenever you\'re ready — Computer fills remaining seats.'
+    ? 'Need at least 2 players to start — share the invite link!'
     : 'Waiting for the host to start the game…');
 }
 
@@ -539,15 +498,9 @@ function startGame(gs) {
   if (!amHost) return;
   const players = gs.players || {};
 
-  // Fill empty seats with AI
+  // Reset chips and bets for all seated human players
   for (let i = 0; i < MAX_PLAYERS; i++) {
-    if (!players[i] || players[i].isEmpty) {
-      players[i] = freshPlayer(COMPUTER_NAMES[i], true);
-    }
-  }
-
-  // Reset chips for continuing players (first game)
-  for (let i = 0; i < MAX_PLAYERS; i++) {
+    if (!players[i] || players[i].isEmpty) continue;
     if (!players[i].chips || players[i].chips <= 0) players[i].chips = STARTING_CHIPS;
     players[i].bet = 0;
     players[i].folded = false;
@@ -684,16 +637,15 @@ function resolveShowdown(gs) {
 
 function startNewRound(gs) {
   if (!amHost) return;
-  // Remove busted players (replace with AI)
+  // Remove disconnected players; refill chips for busted players
   for (let i = 0; i < MAX_PLAYERS; i++) {
     const p = gs.players[i];
     if (!p) continue;
-    if (p.chips <= 0 && !p.isAI) {
-      // Give a small refill for demo purposes
-      p.chips = STARTING_CHIPS;
-    } else if (p.chips <= 0) {
-      p.chips = STARTING_CHIPS; // refill AI
+    if (p.disconnected) {
+      delete gs.players[i];
+      continue;
     }
+    if (p.chips <= 0) p.chips = STARTING_CHIPS;
     p.bet = 0;
     p.folded = false;
     p.allIn = false;
@@ -823,7 +775,7 @@ function applyAction(gs, seat, action, amount = 0) {
 }
 
 /* ─────────────────────────────────────────────
-   Host work scheduler (AI turns, phase checks)
+   Host work scheduler (disconnected-player auto-fold)
 ───────────────────────────────────────────── */
 function scheduleHostWork(gs) {
   if (!amHost) return;
@@ -834,15 +786,14 @@ function scheduleHostWork(gs) {
   const p = gs.players[seat];
   if (!p) return;
 
-  // If it's an AI or disconnected player's turn, handle it
-  if (p.isAI || p.disconnected) {
-    clearTimeout(aiTurnTimeout);
-    aiTurnTimeout = setTimeout(() => {
+  // Auto-fold a disconnected player so the game can continue
+  if (p.disconnected) {
+    clearTimeout(disconnectedPlayerTimeout);
+    disconnectedPlayerTimeout = setTimeout(() => {
       if (!localState || localState.phase === 'waiting' || localState.phase === 'showdown') return;
-      if (localState.currentPlayer !== seat) return; // state changed
-      const decision = aiDecide(localState, seat);
-      applyAction(localState, seat, decision.action, decision.amount || 0);
-    }, 1200 + Math.random() * 1000);
+      if (localState.currentPlayer !== seat) return;
+      applyAction(localState, seat, 'fold', 0);
+    }, 1500);
   }
 }
 
@@ -872,7 +823,7 @@ function renderGame(gs) {
   // My hand
   const me = gs.players[mySeat];
   if (me) {
-    setText('myNameLabel', me.name + (me.isAI ? ' 🤖' : ''));
+    setText('myNameLabel', me.name);
     setText('myChipsLabel', me.chips);
     const myHand = safeParseJSON(me.handJSON, []);
     if (myHand.length > 0) {
@@ -908,8 +859,7 @@ function renderGame(gs) {
 
     let statusBadge = '';
     if (!p.active) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Out</span>';
-    else if (p.isAI) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Computer</span>';
-    else if (p.disconnected) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Computer (was ' + escHtml(p.name) + ')</span>';
+    else if (p.disconnected) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Disconnected</span>';
     if (p.folded) statusBadge += '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.25rem;">Folded</span>';
     if (isTurn) statusBadge += '<span class="badge badge-green" style="font-size:.7rem;margin-left:.25rem;">Turn</span>';
 
@@ -985,10 +935,9 @@ function leaveGame() {
       gs.players[mySeat] = { ...gs.players[mySeat], isEmpty: true, active: false };
     }
   } else {
-    // Mark as disconnected — AI takes over
+    // Mark as disconnected so the host auto-folds this seat
     if (gs.players[mySeat]) {
       gs.players[mySeat].disconnected = true;
-      gs.players[mySeat].isAI = true;
     }
   }
 
@@ -1002,7 +951,7 @@ function leaveGame() {
 }
 
 function goToLobby() {
-  clearTimeout(aiTurnTimeout);
+  clearTimeout(disconnectedPlayerTimeout);
   // Nullify state before destroying so async close-handlers are no-ops
   const p = peer;
   peer = null;
@@ -1065,7 +1014,7 @@ document.addEventListener('DOMContentLoaded', () => {
     playerAction('raise', amt);
   });
   el('btnLeaveGame')?.addEventListener('click', () => {
-    if (confirm('Drop out? The computer will take over your seat.')) leaveGame();
+    if (confirm('Drop out? You will be folded out of the current hand.')) leaveGame();
   });
 
   // Check URL for room code (so users can share direct links)
