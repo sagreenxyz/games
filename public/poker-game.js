@@ -23,7 +23,7 @@ const STARTING_CHIPS = 1000;
 const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
 
-const AI_NAMES = ['Atlas', 'Beacon', 'Cipher', 'Delphi'];
+const COMPUTER_NAMES = ['Computer-1', 'Computer-2', 'Computer-3', 'Computer-4'];
 
 /** Build and shuffle a 52-card deck */
 function makeDeck() {
@@ -507,7 +507,7 @@ function updateWaitingRoom(gs) {
       </div>`;
     } else {
       html += `<div style="display:flex;align-items:center;gap:.5rem;background:rgba(0,0,0,.1);padding:.6rem .9rem;border-radius:8px;opacity:.5;">
-        <span style="color:rgba(255,255,255,.4);">Seat ${i + 1}: empty (AI will fill)</span>
+        <span style="color:rgba(255,255,255,.4);">Seat ${i + 1}: empty (Computer will fill)</span>
       </div>`;
     }
   }
@@ -522,7 +522,7 @@ function updateWaitingRoom(gs) {
     hide('btnStart');
   }
   setText('waitingMsg', amHost
-    ? 'Start whenever you\'re ready — AI fills remaining seats.'
+    ? 'Start whenever you\'re ready — Computer fills remaining seats.'
     : 'Waiting for the host to start the game…');
 }
 
@@ -536,7 +536,7 @@ function startGame(gs) {
   // Fill empty seats with AI
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (!players[i] || players[i].isEmpty) {
-      players[i] = freshPlayer(AI_NAMES[i], true);
+      players[i] = freshPlayer(COMPUTER_NAMES[i], true);
     }
   }
 
@@ -902,8 +902,8 @@ function renderGame(gs) {
 
     let statusBadge = '';
     if (!p.active) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Out</span>';
-    else if (p.isAI) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">AI</span>';
-    else if (p.disconnected) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">AI (was ' + escHtml(p.name) + ')</span>';
+    else if (p.isAI) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Computer</span>';
+    else if (p.disconnected) statusBadge = '<span class="badge badge-gray" style="font-size:.7rem;">Computer (was ' + escHtml(p.name) + ')</span>';
     if (p.folded) statusBadge += '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.25rem;">Folded</span>';
     if (isTurn) statusBadge += '<span class="badge badge-green" style="font-size:.7rem;margin-left:.25rem;">Turn</span>';
 
