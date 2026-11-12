@@ -15,6 +15,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [How to Play — Rummy and Rummy 500](#-how-to-play--rummy-and-rummy-500)
 - [How to Play — Klondike Solitaire](#-how-to-play--klondike-solitaire)
 - [How to Play — Crazy Eights](#-how-to-play--crazy-eights)
+- [How to Play — Hearts](#️-how-to-play--hearts)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -194,6 +195,19 @@ For **2–6 players**. Deal 7 cards each for 2 players, 5 for 3–6; the next ca
 
 ---
 
+## ♥️ How to Play — Hearts
+
+Exactly **4 players**, 13 cards each. Points are bad — the lowest score wins.
+
+1. **Pass**: before each hand, choose 3 cards to pass — to the left, then right, then across, then no pass, repeating. Cards passed to you are outlined in green.
+2. **Play**: the 2♣ leads the first trick. Follow suit if you can, otherwise play anything; the highest card of the suit led wins the trick and leads next. Playable cards are highlighted.
+3. No hearts or Q♠ on the first trick (unless you have nothing else), and hearts can't be led until one has been played.
+4. **Scoring**: each heart taken is 1 point, the Q♠ is 13. Take all 26 to **shoot the moon** — you score 0 and everyone else 26. When someone reaches **100**, the lowest score wins.
+
+Hearts needs four people: if a player leaves for good, the game ends.
+
+---
+
 ## 🏗 Technical Architecture
 
 ### Stack
@@ -354,6 +368,8 @@ games/
 │   ├── rummy-logic.js / rummy-game.js ← Basic Rummy + Rummy 500 (one engine, two variants)
 │   ├── klondike-logic.js / klondike-game.js ← Klondike (solo; no room.js)
 │   ├── crazy-eights-logic.js / crazy-eights-game.js ← Crazy Eights
+│   ├── tricks-core.js / trick-ui.js ← shared trick-taking rules + 4-seat table rendering
+│   ├── hearts-logic.js / hearts-game.js ← Hearts
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │

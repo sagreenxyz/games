@@ -273,3 +273,32 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 .k-board .playing-card.hint { outline: 3px solid #74c69d; outline-offset: -1px; }
 .k-target { outline: 2px dashed var(--gold); outline-offset: 2px; }
 .k-slot.hint { outline: 3px solid #74c69d; outline-offset: 2px; }
+
+/* ══════════ Trick-taking table ══════════ */
+.trick-table { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(200px, 2fr) minmax(90px, 1fr); grid-template-rows: auto auto; gap: .6rem; align-items: center; }
+.trick-seat { text-align: center; font-size: .85rem; }
+.trick-seat.top { grid-column: 2; grid-row: 1; }
+.trick-seat.left { grid-column: 1; grid-row: 2; }
+.trick-seat.right { grid-column: 3; grid-row: 2; }
+.trick-seat .cards-row { justify-content: center; min-height: 0; }
+.trick-seat.turn .seat-name { color: var(--gold); text-decoration: underline; }
+.seat-name { font-weight: 700; }
+.trick-area { grid-column: 2; grid-row: 2; position: relative; height: 210px; }
+.trick-area .playing-card { position: absolute; }
+.trick-area .pos-bottom { left: 50%; bottom: 0; transform: translateX(-50%); }
+.trick-area .pos-top { left: 50%; top: 0; transform: translateX(-50%); }
+.trick-area .pos-left { left: 8%; top: 50%; transform: translateY(-50%); }
+.trick-area .pos-right { right: 8%; top: 50%; transform: translateY(-50%); }
+.trick-area.done .playing-card { opacity: .55; }
+.trick-area .trick-note { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; font-size: .8rem; color: var(--gold); pointer-events: none; }
+.playing-card.recv { box-shadow: 0 0 0 3px #74c69d; }
+.bid-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; max-width: 420px; }
+.bid-grid .btn { justify-content: center; padding: .4rem 0; }
+@media (max-width: 520px) {
+  .trick-table { grid-template-columns: 1fr 1.6fr 1fr; }
+  .trick-area { height: 180px; }
+  .trick-area .playing-card { width: 46px; height: 69px; font-size: .7rem; }
+  .trick-area .card-suit-mid { font-size: 1.1rem; }
+}
+.trick-seat .cards-row.fan { flex-wrap: nowrap; }
+.trick-seat .cards-row.fan .playing-card + .playing-card { margin-left: -34px; }

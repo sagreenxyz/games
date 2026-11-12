@@ -1,0 +1,19 @@
+---
+import GameRoom from '../../components/GameRoom.astro';
+import TrickTable from '../../components/TrickTable.astro';
+---
+<GameRoom slug="hearts" extra={['tricks-core.js', 'trick-ui.js']}>
+  <Fragment slot="rules">
+    <ul>
+      <li>Four players, 13 cards each. Before each hand pass 3 cards: left, then right, then across, then no pass.</li>
+      <li>The 2♣ leads the first trick. Follow suit if you can; the highest card of the suit led takes the trick.</li>
+      <li>Every heart you take is 1 point and the Q♠ is 13 — points are bad! No points on the first trick, and hearts can't be led until one has been played.</li>
+      <li>Take all 26 points to <strong>shoot the moon</strong>: you score 0 and everyone else 26. When someone reaches 100, the lowest score wins.</li>
+    </ul>
+  </Fragment>
+  <TrickTable>
+    <div slot="controls" class="row wrap">
+      <button id="btnPass" class="btn btn-primary hidden" disabled>Pass 3 cards</button>
+    </div>
+  </TrickTable>
+</GameRoom>
