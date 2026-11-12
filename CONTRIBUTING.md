@@ -103,6 +103,10 @@ The **host browser** holds the authoritative game state, runs every action throu
 | `public/<game>-game.js` | — | Renders the game and calls `Room.init({ logic, render, ... })` |
 | `src/components/GameRoom.astro` | — | Page shell: lobby + waiting room markup, "How to play" slot, script tags in order |
 | `src/data/games.ts` | `games` | Registry that drives the home page and the header nav |
+| `public/rummy-core.js` | `RummyCore` | Meld family: sets/runs, best meld arrangement (min deadwood), layoff candidates |
+| `public/tricks-core.js` | `TrickCore` | Trick family: follow-suit legality, trick winner with optional trump |
+| `public/trick-ui.js` + `TrickTable.astro` | `TrickUI` | Four-seat table rendering shared by Hearts and Spades |
+| `RummyTable.astro` | — | Table markup shared by Rummy and Rummy 500 |
 
 ### The rules-engine interface
 
@@ -294,7 +298,18 @@ The config (`playwright.config.js`) starts the Astro dev server automatically (r
 5. **Tests**: add the engine to `tests/unit/engines.test.mjs` (free fuzz coverage), write rules tests in `tests/unit/<slug>-logic.test.mjs`, and an E2E spec `tests/<slug>.spec.js` covering a game played through and a player leaving.
 6. **Docs**: rules in the README.
 
-Solo games skip `room.js`: the page uses `Layout` directly and the UI drives the engine itself (seat 0), saving to `localStorage`.
+Solo games skip `room.js`: the page uses `Layout` directly and the UI drives the engine itself (seat 0), saving to `localStorage`. See `klondike-*.js`.
+
+**Pick a family first.** Most new games are mostly rules on top of a shared engine:
+
+| Family | Reuse | Examples |
+|--------|-------|----------|
+| Meld | `rummy-core.js`, `RummyTable.astro` | Gin Rummy, Rummy, Rummy 500 |
+| Trick-taking | `tricks-core.js`, `trick-ui.js`, `TrickTable.astro` | Hearts, Spades |
+| Shedding | `cards.js` only | Sevens, Crazy Eights |
+| Solo | `cards.js`, no room | Klondike |
+
+**Hidden information checklist**: anything a player shouldn't see must live either in a player's `handJSON` (blanked for others) or in a field listed in `hiddenFields`. Per-player secrets that aren't cards (e.g. Hearts' pending passes) go in a hidden field, with a public summary (e.g. `passedSeats`).
 
 ---
 
