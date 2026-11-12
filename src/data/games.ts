@@ -21,6 +21,7 @@ export const games: GameInfo[] = [
   { slug: 'rummy500', name: 'Rummy 500', emoji: '5️⃣', blurb: 'Dig into the discard pile, score every card you meld. First to 500.', players: '2–6 players', mode: 'multi', family: 'meld' },
   { slug: 'klondike', name: 'Klondike Solitaire', emoji: '🂮', blurb: 'The classic patience: build the foundations Ace to King. Draw 1 or 3, with undo.', players: 'Solo', mode: 'solo', family: 'solitaire' },
   { slug: 'crazy-eights', name: 'Crazy Eights', emoji: '🎱', blurb: 'Match suit or rank, eights are wild. First to empty their hand scores.', players: '2–6 players', mode: 'multi', family: 'shedding' },
+  { slug: 'hearts', name: 'Hearts', emoji: '♥️', blurb: 'Pass three, follow suit, dodge the hearts and the Q♠ — or shoot the moon.', players: '4 players', mode: 'multi', family: 'trick' },
   { slug: 'sevens', name: 'Sevens', emoji: '7️⃣', blurb: 'Fan Tan — build each suit out from its 7. First to empty their hand wins.', players: '2–4 players', mode: 'multi', family: 'shedding' },
 ];
 

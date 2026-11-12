@@ -1,0 +1,54 @@
+---
+/**
+ * Four-seat table for trick-taking games (Hearts, Spades). Opponents sit
+ * left / across / right of you; the current trick is in the middle.
+ * The `controls` slot holds game-specific buttons (passing, bidding).
+ */
+---
+<section id="gameTable" class="hidden">
+  <div class="top-bar">
+    <span id="roundLabel" class="label"></span>
+    <span id="infoLabel" class="small"></span>
+    <span class="room">Room: <strong id="tableRoomCode"></strong></span>
+    <button id="btnLeaveGame" class="btn btn-sm btn-danger">Leave</button>
+  </div>
+  <div class="game-layout">
+    <div class="game-main">
+      <div class="trick-table panel felt">
+        <div id="seat-top" class="trick-seat top"></div>
+        <div id="seat-left" class="trick-seat left"></div>
+        <div id="trickArea" class="trick-area" aria-live="polite"></div>
+        <div id="seat-right" class="trick-seat right"></div>
+      </div>
+      <div class="panel">
+        <div class="row wrap mb-1">
+          <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
+          <span id="myInfo" class="badge badge-gray"></span>
+        </div>
+        <div id="myCards" class="hand-row"></div>
+      </div>
+      <div class="panel">
+        <div id="actionMessage" class="msg mb-1"></div>
+        <slot name="controls" />
+      </div>
+      <div id="scoreboard" class="panel"></div>
+    </div>
+    <aside class="side-log">
+      <h3>📜 Action Log</h3>
+      <div id="actionLogList" class="log-list"></div>
+    </aside>
+  </div>
+</section>
+
+<div id="handModal" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="handTitle"></h2>
+    <div id="handDetails"></div>
+    <div class="row wrap mt-2" style="justify-content:center;">
+      <button id="btnNextHand" class="btn btn-primary hidden">Next hand</button>
+      <button id="btnNewMatch" class="btn btn-primary hidden">New match</button>
+      <button id="btnLeaveAfter" class="btn btn-outline">← Leave</button>
+    </div>
+    <div id="handWaitMsg" class="muted small mt-1 hidden">Waiting for the host…</div>
+  </div>
+</div>

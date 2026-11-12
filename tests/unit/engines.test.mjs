@@ -12,6 +12,7 @@ const ENGINES = [
   { file: 'sevens-logic.js', name: 'SevensLogic', games: 60, mustFinish: true },
   { file: 'gin-logic.js', name: 'GinLogic', deps: ['rummy-core.js'], rounds: 30, games: 60, mustFinish: true },
   { file: 'crazy-eights-logic.js', name: 'CrazyEightsLogic', rounds: 20, games: 40, mustFinish: true },
+  { file: 'hearts-logic.js', name: 'HeartsLogic', deps: ['tricks-core.js'], rounds: 12, games: 25, mustFinish: true },
   // Random play rarely goes out, so rummy fuzz checks invariants over a capped number of steps
   // (rummy-logic.test.mjs also plays complete matches with a greedy player).
   { file: 'rummy-logic.js', name: 'RummyLogic', sub: 'basic', deps: ['rummy-core.js'], rounds: 3, games: 15, mustFinish: false, maxSteps: 1500 },
