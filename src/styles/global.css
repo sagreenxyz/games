@@ -242,3 +242,8 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 .result-hand { margin: .75rem 0; }
 .result-hand .row { gap: .4rem; flex-wrap: wrap; }
 .playing-card.layoff { outline: 3px solid var(--gold); outline-offset: 1px; }
+.discard-spread { gap: 0; flex-wrap: wrap; row-gap: .3rem; }
+.discard-spread .pile-btn + .pile-btn { margin-left: -14px; }
+.discard-spread .pile-btn:disabled .playing-card { cursor: default; }
+.meld-target { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; }
+.meld-target:hover { background: rgba(244,162,97,.25); }

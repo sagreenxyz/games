@@ -1,0 +1,15 @@
+---
+import GameRoom from '../../components/GameRoom.astro';
+import RummyTable from '../../components/RummyTable.astro';
+---
+<GameRoom slug="rummy500" extra={['rummy-core.js']} logic="rummy-logic.js" game="rummy-game.js">
+  <Fragment slot="rules">
+    <ul>
+      <li>Deal: 13 cards each for 2 players, 7 for 3–6. Melds are sets or runs; Aces can be low (A-2-3) or high (Q-K-A).</li>
+      <li>Draw from the stock, or take any card from the discard pile <em>plus every card above it</em>. If you take more than the top card, you must meld the deepest card you took this turn.</li>
+      <li>Meld and lay off on any meld, then discard. Every card you put on the table scores for you; cards left in your hand count against you.</li>
+      <li>Values: Ace 15 (1 in a low run), 10/J/Q/K 10, 2–9 5. The hand ends when someone goes out or the stock runs out. First to 500 wins.</li>
+    </ul>
+  </Fragment>
+  <RummyTable variant="500" />
+</GameRoom>

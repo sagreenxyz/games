@@ -11,11 +11,16 @@ const ENGINES = [
   { file: 'poker-logic.js', name: 'PokerLogic', rounds: 15, games: 60, mustFinish: true },
   { file: 'sevens-logic.js', name: 'SevensLogic', games: 60, mustFinish: true },
   { file: 'gin-logic.js', name: 'GinLogic', deps: ['rummy-core.js'], rounds: 30, games: 60, mustFinish: true },
+  // Random play rarely goes out, so rummy fuzz checks invariants over a capped number of steps
+  // (rummy-logic.test.mjs also plays complete matches with a greedy player).
+  { file: 'rummy-logic.js', name: 'RummyLogic', sub: 'basic', deps: ['rummy-core.js'], rounds: 3, games: 15, mustFinish: false, maxSteps: 1500 },
+  { file: 'rummy-logic.js', name: 'RummyLogic', sub: 'r500', deps: ['rummy-core.js'], rounds: 3, games: 15, mustFinish: false, maxSteps: 1500 },
 ];
 
 for (const E of ENGINES) {
-  const L = loadScripts('cards.js', ...(E.deps || []), E.file)[E.name];
-  describe(`${E.name}: shared interface`, () => {
+  const mod = loadScripts('cards.js', ...(E.deps || []), E.file)[E.name];
+  const L = E.sub ? mod[E.sub] : mod;
+  describe(`${E.name}${E.sub ? '.' + E.sub : ''}: shared interface`, () => {
     test('implements the interface and enforces player counts', () => interfaceChecks(L));
 
     test('removing a player mid-game never leaves it stuck', () => {

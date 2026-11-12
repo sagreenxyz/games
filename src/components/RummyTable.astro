@@ -1,0 +1,76 @@
+---
+/** Table markup shared by Rummy and Rummy 500 (rummy-game.js renders into it). */
+interface Props { variant: 'basic' | '500'; }
+const { variant } = Astro.props;
+---
+<section id="gameTable" class="hidden" data-variant={variant}>
+  <div class="top-bar">
+    <span id="roundLabel" class="label"></span>
+    <span id="scoreLabel" class="small"></span>
+    <span class="room">Room: <strong id="tableRoomCode"></strong></span>
+    <button id="btnLeaveGame" class="btn btn-sm btn-danger">Leave</button>
+  </div>
+  <div class="game-layout">
+    <div class="game-main">
+      <div id="opponentsRow" class="opp-grid"></div>
+
+      <div class="panel felt">
+        <div class="row wrap" style="gap:1.5rem;align-items:flex-start;">
+          <div class="pile">
+            <button id="stockPile" class="pile-btn" aria-label="Draw from the stock"></button>
+            <span id="stockCount"></span>
+          </div>
+          <div class="pile" style="align-items:flex-start;flex:1;min-width:0;">
+            <div id="discardPile" class="cards-row discard-spread"></div>
+            <span id="discardHint">Discard pile</span>
+          </div>
+        </div>
+        <div class="muted small mt-2">Melds on the table <span id="layoffHint"></span></div>
+        <div id="tableMelds" class="row wrap mt-1" style="gap:.6rem;min-height:66px;"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row wrap mb-1">
+          <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
+          <span id="myScore" class="badge badge-gray"></span>
+          <label class="row small" style="margin:0 0 0 auto;">Sort
+            <select id="sortMode" style="width:auto;padding:.2rem .4rem;">
+              <option value="suit">By suit</option>
+              <option value="rank">By rank</option>
+            </select>
+          </label>
+        </div>
+        <div id="myCards" class="hand-row"></div>
+      </div>
+
+      <div class="panel">
+        <div id="actionMessage" class="msg mb-1"></div>
+        <div class="row wrap">
+          <button id="btnStock" class="btn btn-outline hidden">Draw from stock</button>
+          <button id="btnTakeTop" class="btn btn-success hidden">Take top discard</button>
+          <button id="btnMeld" class="btn btn-success hidden" disabled>Meld selected</button>
+          <button id="btnDiscard" class="btn btn-primary hidden" disabled>Discard</button>
+          <button id="btnClear" class="btn btn-outline btn-sm hidden">Clear selection</button>
+          <button id="btnEndHand" class="btn btn-danger hidden">End hand (stock is empty)</button>
+        </div>
+      </div>
+    </div>
+    <aside class="side-log">
+      <h3>📜 Action Log</h3>
+      <div id="actionLogList" class="log-list"></div>
+    </aside>
+  </div>
+</section>
+
+<div id="handModal" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="handTitle"></h2>
+    <div id="handDetails"></div>
+    <div class="row wrap mt-2" style="justify-content:center;">
+      <button id="btnNextHand" class="btn btn-primary hidden">Next hand</button>
+      <button id="btnNewMatch" class="btn btn-primary hidden">New match</button>
+      <button id="btnLeaveAfter" class="btn btn-outline">← Leave</button>
+    </div>
+    <div id="handWaitMsg" class="muted small mt-1 hidden">Waiting for the host…</div>
+  </div>
+</div>
