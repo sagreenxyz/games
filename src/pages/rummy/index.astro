@@ -1,0 +1,15 @@
+---
+import GameRoom from '../../components/GameRoom.astro';
+import RummyTable from '../../components/RummyTable.astro';
+---
+<GameRoom slug="rummy" extra={['rummy-core.js']} logic="rummy-logic.js" game="rummy-game.js">
+  <Fragment slot="rules">
+    <ul>
+      <li>Deal: 10 cards each for 2 players, 7 for 3–4, 6 for 5–6. Melds are sets (3–4 of a rank) or runs (3+ in a row, same suit). Aces are low.</li>
+      <li>Your turn: draw from the stock or take the top discard → meld and lay off on any meld on the table → discard one card.</li>
+      <li>Go out by getting rid of every card. You score the value of everyone else's cards (A=1, faces=10), doubled for <strong>rummy</strong> — going out in one turn without having melded before.</li>
+      <li>The discard pile is turned over when the stock runs out, at most twice per hand. First to 100 wins.</li>
+    </ul>
+  </Fragment>
+  <RummyTable variant="basic" />
+</GameRoom>

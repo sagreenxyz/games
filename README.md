@@ -12,6 +12,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [How to Play — Poker](#-how-to-play--texas-holdem-poker)
 - [How to Play — Sevens](#-how-to-play--sevens)
 - [How to Play — Gin Rummy](#-how-to-play--gin-rummy)
+- [How to Play — Rummy and Rummy 500](#-how-to-play--rummy-and-rummy-500)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -149,6 +150,23 @@ Two players, 10 cards each. Make **melds**: sets (3 or 4 of a rank) or runs (3+ 
 | Big gin | 31 + defender's deadwood |
 
 If only 2 cards are left in the stock after a discard, the hand is void and the same dealer deals again. First to **100** wins the match: +100 game bonus, +25 per hand won, and the total is doubled for a shutout. If a player leaves, the other wins.
+
+---
+
+## 🂡 How to Play — Rummy and Rummy 500
+
+Both games are for **2–6 players** and share the same turn: **draw** (stock or discard pile) → **meld** sets/runs and **lay off** cards on any meld on the table, yours or anyone's → **discard** one card. Get rid of your last card (by melding or discarding) to **go out**. Select several cards and click *Meld selected*; select one card and click a highlighted meld to lay it off.
+
+| | Basic Rummy | Rummy 500 |
+|---|---|---|
+| Cards dealt | 10 (2 players), 7 (3–4), 6 (5–6) | 13 (2 players), 7 (3–6) |
+| Aces | Low only (A-2-3) | Low or high (A-2-3 or Q-K-A), never K-A-2 |
+| Discard pile | Take the top card only; you can't throw it back that turn | Take any card **and every card above it**; if you take more than the top card, you must meld the deepest one this turn |
+| Stock runs out | Discard pile is turned over (up to twice per hand; after that the hand ends with no score) | The hand ends when a player with an empty stock doesn't take from the discard pile |
+| Scoring | Whoever goes out scores the cards left in everyone else's hands (A 1, 2–10 face, J/Q/K 10), **doubled for "rummy"** — going out in one turn without having melded before | Everyone scores the cards they melded or laid off minus the cards left in their hand: A 15 (1 in a low run), 10/J/Q/K 10, 2–9 5 |
+| Winning | First to 100 | First to 500 (highest score if several reach it in the same hand) |
+
+If a player leaves, their cards go back under the stock and play continues; the last player left wins.
 
 ---
 
@@ -309,6 +327,7 @@ games/
 │   ├── poker-game.js                ← Poker UI + host orchestration
 │   ├── rummy-core.js                ← shared meld engine (sets, runs, deadwood, layoffs)
 │   ├── gin-logic.js / gin-game.js   ← Gin Rummy
+│   ├── rummy-logic.js / rummy-game.js ← Basic Rummy + Rummy 500 (one engine, two variants)
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │
