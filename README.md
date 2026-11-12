@@ -14,6 +14,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [How to Play — Gin Rummy](#-how-to-play--gin-rummy)
 - [How to Play — Rummy and Rummy 500](#-how-to-play--rummy-and-rummy-500)
 - [How to Play — Klondike Solitaire](#-how-to-play--klondike-solitaire)
+- [How to Play — Crazy Eights](#-how-to-play--crazy-eights)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -182,6 +183,17 @@ A one-player game — no room or friends needed. Move all 52 cards to the four *
 
 ---
 
+## 🎱 How to Play — Crazy Eights
+
+For **2–6 players**. Deal 7 cards each for 2 players, 5 for 3–6; the next card starts the discard pile.
+
+- Play a card matching the top card's **suit or rank**. Playable cards are highlighted.
+- **Eights are wild**: play one at any time and name the suit the next player must follow.
+- If you can't play, **draw one card**. If it fits you may play it, otherwise your turn ends. When the stock runs out, the discard pile is shuffled into a new one.
+- First to empty their hand scores the cards left in everyone else's hand: **8 = 50**, J/Q/K = 10, A = 1, others face value. If nobody can play or draw, the lowest hand wins the difference. First to **100** wins.
+
+---
+
 ## 🏗 Technical Architecture
 
 ### Stack
@@ -341,6 +353,7 @@ games/
 │   ├── gin-logic.js / gin-game.js   ← Gin Rummy
 │   ├── rummy-logic.js / rummy-game.js ← Basic Rummy + Rummy 500 (one engine, two variants)
 │   ├── klondike-logic.js / klondike-game.js ← Klondike (solo; no room.js)
+│   ├── crazy-eights-logic.js / crazy-eights-game.js ← Crazy Eights
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │
