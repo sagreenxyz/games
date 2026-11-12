@@ -1,0 +1,80 @@
+---
+/**
+ * Page shell for a multiplayer game: lobby, waiting room, the game's own
+ * table markup (the default slot), and the script tags in the right order.
+ * room.js drives the lobby and waiting room; keep their element IDs as-is.
+ *
+ * Props:
+ *   slug    — registry slug; loads public/<slug>-logic.js and <slug>-game.js
+ *   extra   — extra scripts loaded before the logic file (e.g. shared engines)
+ *   logic / game — override the logic / UI script names
+ */
+import Layout from '../layouts/Layout.astro';
+import { gameBySlug } from '../data/games';
+
+interface Props { slug: string; extra?: string[]; logic?: string; game?: string; }
+const { slug, extra = [], logic = `${slug}-logic.js`, game = `${slug}-game.js` } = Astro.props;
+const info = gameBySlug(slug);
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const scripts = ['peerjs.min.js', 'qrcode.min.js', 'cards.js', 'room.js', ...extra, logic, game];
+---
+<Layout title={info.name} description={`${info.name} — ${info.blurb} ${info.players}, no account needed.`}>
+  <div id="app" class="app">
+
+    <section id="lobby" class="lobby">
+      <h1 class="text-center">{info.emoji} {info.name}</h1>
+      <p class="text-center muted lobby-sub">{info.blurb} · {info.players}</p>
+      <div class="panel felt">
+        <label for="playerName">Your display name</label>
+        <input id="playerName" type="text" placeholder="e.g. Alice" maxlength="20" autocomplete="off" />
+        <div class="lobby-buttons">
+          <button id="btnNew" class="btn btn-primary">✨ New Room</button>
+          <button id="btnJoin" class="btn btn-outline">🔗 Join Room</button>
+        </div>
+        <div id="joinFields" class="hidden mt-2">
+          <label for="roomCode">Room code</label>
+          <div class="row">
+            <input id="roomCode" type="text" placeholder="6-character code" maxlength="6" style="text-transform:uppercase;" autocomplete="off" />
+            <button id="btnJoinConfirm" class="btn btn-success">Join →</button>
+          </div>
+        </div>
+        <p id="lobbyError" class="lobby-error" role="alert"></p>
+      </div>
+      <details class="rules panel">
+        <summary>How to play</summary>
+        <slot name="rules" />
+      </details>
+    </section>
+
+    <section id="waitingRoom" class="hidden waiting">
+      <div class="panel felt">
+        <h2>Waiting Room</h2>
+        <p class="muted small mb-1">Share the invite link or room code. {info.name} is for {info.players}.</p>
+        <div class="code-row">
+          <span class="muted small">Room code:</span>
+          <strong id="displayRoomCode" class="room-code"></strong>
+          <button id="btnCopyCode" class="btn btn-sm btn-outline" style="margin-left:auto;">📋 Copy code</button>
+        </div>
+        <div class="code-row light">
+          <span class="muted small" style="white-space:nowrap;">Invite link:</span>
+          <code id="inviteLink" class="invite-link"></code>
+          <button id="btnCopyLink" class="btn btn-sm btn-outline" style="white-space:nowrap;">🔗 Copy link</button>
+        </div>
+        <div class="qr-row">
+          <span class="muted small">📱 Scan to join on mobile</span>
+          <div id="qrCodeContainer" class="qr"></div>
+        </div>
+        <div id="playerSlots" class="seats"></div>
+        <div class="row wrap">
+          <button id="btnStart" class="btn btn-primary hidden">▶ Start Game</button>
+          <button id="btnLeaveWaiting" class="btn btn-outline btn-sm">← Leave</button>
+        </div>
+        <p id="waitingMsg" class="muted small mt-1"></p>
+      </div>
+    </section>
+
+    <slot />
+  </div>
+</Layout>
+
+{scripts.map(src => <script is:inline src={`${base}/${src}`}></script>)}

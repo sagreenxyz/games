@@ -1,16 +1,16 @@
 /**
  * poker-logic.js — Texas Hold'em rules engine (no DOM, no network, no timers).
  *
- * Every function takes the game state object `gs` and mutates it in place.
- * The UI layer (poker-game.js) calls these on the host and then broadcasts
- * the result with Room.pushState(). Loaded as a classic script in the browser
- * (exposes `window.PokerLogic`) and via `vm` in the unit tests.
+ * Implements the shared rules-engine interface used by room.js (see the top
+ * of room.js): create / freshPlayer / start / apply / legalActions /
+ * removePlayer / canSeeHand. Every function mutates `gs` in place.
+ * Requires cards.js. Exposes `window.PokerLogic`.
  *
  * State shape (host copy; guests receive a redacted copy without `deck` and
  * without other players' hands):
  *   phase: 'waiting' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown'
  *   round, dealer, currentPlayer, currentBet, minRaise, pot,
- *   players: { [seat]: Player }, communityCards, deck, hostSeat,
+ *   players: { [seat]: Player }, communityCards, deck, burned, hostSeat,
  *   streetActed: seats that acted since the street began / last full raise,
  *   showdownRevealed: true when hands were compared at showdown,
  *   lastAction, winnerInfo, actionLog
@@ -24,7 +24,7 @@
   const SUITS = ['♠', '♥', '♦', '♣'];
   const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
   const RANK_VAL = Object.fromEntries(RANKS.map((r, i) => [r, i + 2]));
-  const MAX_PLAYERS = 4;
+  const MAX_PLAYERS = 6;
   const STARTING_CHIPS = 1000;
   const SMALL_BLIND = 10;
   const BIG_BLIND = 20;
@@ -39,15 +39,7 @@
 
   /* ───────────── Cards ───────────── */
 
-  function makeDeck(rng = Math.random) {
-    const d = [];
-    for (const s of SUITS) for (const r of RANKS) d.push({ r, s });
-    for (let i = d.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [d[i], d[j]] = [d[j], d[i]];
-    }
-    return d;
-  }
+  const makeDeck = rng => Cards.makeDeck(rng);
 
   /* ───────────── Hand evaluation ───────────── */
 
@@ -125,6 +117,7 @@
       players: {},
       communityCards: [],
       deck: [],
+      burned: [],
       hostSeat: 0,
       lastAction: '',
       winnerInfo: '',
@@ -202,32 +195,32 @@
   /* ───────────── Hand lifecycle ───────────── */
 
   /**
-   * Start a new hand: drop disconnected players, rebuy busted ones, move the
-   * button, deal, post blinds. Returns false (and resets to 'waiting') when
-   * fewer than two players remain.
+   * Start a new hand: drop players who left, sit out anyone who is
+   * reconnecting, rebuy busted players, move the button, deal, post blinds.
+   * Returns false (and resets to 'waiting') when fewer than two can play.
    */
   function startHand(gs, deck = makeDeck()) {
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const p = gs.players[i];
       if (!p) continue;
-      if (p.disconnected || p.isEmpty) { delete gs.players[i]; continue; }
+      if (p.left || p.isEmpty) { delete gs.players[i]; continue; }
       if (p.chips <= 0) p.chips = STARTING_CHIPS;
-      Object.assign(p, { bet: 0, contributed: 0, folded: false, allIn: false, active: true, handJSON: '[]' });
+      Object.assign(p, { bet: 0, contributed: 0, folded: false, allIn: false, active: !p.disconnected, handJSON: '[]' });
     }
     Object.assign(gs, {
-      communityCards: [], deck, pot: 0, currentBet: 0, minRaise: BIG_BLIND,
+      communityCards: [], deck, burned: [], pot: 0, currentBet: 0, minRaise: BIG_BLIND,
       streetActed: [], winnerInfo: '', lastAction: '', showdownRevealed: false, currentPlayer: -1,
     });
 
-    const seats = Object.keys(gs.players).map(Number);
+    const seats = Object.keys(gs.players).map(Number).filter(s => gs.players[s].active);
     if (seats.length < 2) {
-      for (const s of seats) gs.players[s].active = false;
+      for (const p of Object.values(gs.players)) p.active = false;
       gs.phase = 'waiting';
       gs.deck = [];
       return false;
     }
 
-    gs.dealer = seatsAfter(gs.dealer).find(s => gs.players[s]);
+    gs.dealer = seatsAfter(gs.dealer).find(s => gs.players[s]?.active);
     gs.round = (gs.round || 0) + 1;
     gs.phase = 'pre-flop';
     if (gs.round === 1) gs.actionLog = [];
@@ -260,7 +253,7 @@
     gs.minRaise = BIG_BLIND;
     gs.streetActed = [];
     gs.phase = next;
-    gs.deck.pop(); // burn
+    gs.burned.push(gs.deck.pop()); // burn
     const n = next === 'flop' ? 3 : 1;
     for (let i = 0; i < n; i++) gs.communityCards.push(gs.deck.pop());
     log(gs, `--- ${phaseLabel(next)} ---`);
@@ -353,7 +346,7 @@
   /* ───────────── Player actions ───────────── */
 
   /** What `seat` may do right now (for the UI and for validation). */
-  function legalActions(gs, seat) {
+  function bettingOptions(gs, seat) {
     const p = gs.players[seat];
     const none = { canAct: false, canCheck: false, canCall: false, canRaise: false, toCall: 0, minRaise: 0, maxRaise: 0 };
     if (!BETTING_PHASES.includes(gs.phase) || gs.currentPlayer !== seat || !canAct(p)) return none;
@@ -376,7 +369,7 @@
    * Returns { ok: true } or { ok: false, error }. Invalid actions change nothing.
    */
   function applyAction(gs, seat, action, amount = 0) {
-    const legal = legalActions(gs, seat);
+    const legal = bettingOptions(gs, seat);
     if (!legal.canAct) return { ok: false, error: 'Not your turn.' };
     const p = gs.players[seat];
     const prevBet = gs.currentBet;
@@ -444,11 +437,55 @@
     return gs.phase === 'showdown' && gs.showdownRevealed && isLive(p);
   }
 
+  /* ───────────── Shared engine interface ───────────── */
+
+  /** Concrete legal actions for `seat` (a sample of raise sizes). */
+  function legalActions(gs, seat) {
+    const o = bettingOptions(gs, seat);
+    if (!o.canAct) return [];
+    const out = [{ type: 'fold' }];
+    if (o.canCheck) out.push({ type: 'check' });
+    if (o.canCall) out.push({ type: 'call' });
+    if (o.canRaise) {
+      out.push({ type: 'raise', amount: o.minRaise });
+      if (o.maxRaise > o.minRaise * 3) out.push({ type: 'raise', amount: o.minRaise * 3 });
+      out.push({ type: 'allin' });
+    }
+    return out;
+  }
+
+  function apply(gs, seat, action) {
+    if (!action || typeof action.type !== 'string') return { ok: false, error: 'Unknown action.' };
+    return applyAction(gs, seat, action.type, action.amount);
+  }
+
+  /** A player is gone for good: fold them out of the current hand. */
+  function removePlayer(gs, seat) {
+    const p = gs.players[seat];
+    if (!p || !BETTING_PHASES.includes(gs.phase) || !isLive(p)) return;
+    p.folded = true;
+    log(gs, `${p.name} left the table`);
+    // Only move the action on if it was their turn or the hand/street is now decided.
+    if (gs.currentPlayer === seat || liveSeats(gs).length <= 1 || isBettingRoundOver(gs)) settle(gs);
+  }
+
+  function allCards(gs) {
+    const cards = [...(gs.deck || []), ...(gs.burned || []), ...gs.communityCards];
+    for (const p of Object.values(gs.players)) if (p) cards.push(...parseHand(p));
+    return cards;
+  }
+
   root.PokerLogic = {
+    id: 'poker', minPlayers: 2, maxPlayers: MAX_PLAYERS, hiddenFields: ['deck', 'burned'],
+    create: buildFreshRoomState, freshPlayer,
+    start: (gs, rng) => startHand(gs, makeDeck(rng)),
+    nextRound: (gs, rng) => startHand(gs, makeDeck(rng)),
+    isOver: gs => gs.phase === 'showdown',
+    isMatchOver: () => false,
+    apply, legalActions, removePlayer, canSeeHand, allCards,
+    // poker-specific
     SUITS, RANKS, RANK_VAL, MAX_PLAYERS, STARTING_CHIPS, SMALL_BLIND, BIG_BLIND, BETTING_PHASES,
-    phaseLabel, makeDeck, evalHand, score5,
-    buildFreshRoomState, freshPlayer,
-    startHand, applyAction, legalActions, isBettingRoundOver, buildPots, canSeeHand,
-    isLive, canAct,
+    phaseLabel, makeDeck, evalHand, score5, buildFreshRoomState,
+    startHand, applyAction, bettingOptions, isBettingRoundOver, buildPots, isLive, canAct,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

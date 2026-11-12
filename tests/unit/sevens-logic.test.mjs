@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadScripts, rng } from './load.mjs';
 
-const S = loadScripts('sevens-logic.js').SevensLogic;
+const S = loadScripts('cards.js', 'sevens-logic.js').SevensLogic;
 
 const hand = (gs, seat) => JSON.parse(gs.players[seat].handJSON);
 const card = str => ({ r: str.slice(0, -1), s: str.slice(-1) });
@@ -92,7 +92,7 @@ describe('players leaving', () => {
     const gs = table(3);
     S.startGame(gs, S.makeDeck(rng(6)));
     const leaver = gs.currentPlayer;
-    gs.players[leaver].disconnected = true;
+    gs.players[leaver].left = true;
     S.removePlayer(gs, leaver);
     assert.equal(hand(gs, leaver).length, 0);
     const total = [0, 1, 2].reduce((a, s) => a + hand(gs, s).length, 0);
@@ -104,7 +104,7 @@ describe('players leaving', () => {
   test('the game ends when only one player is left', () => {
     const gs = table(2);
     S.startGame(gs, S.makeDeck(rng(7)));
-    gs.players[1].disconnected = true;
+    gs.players[1].left = true;
     S.removePlayer(gs, 1);
     assert.equal(gs.phase, 'finished');
     assert.deepEqual([...gs.finishOrder], [0]);
@@ -113,7 +113,7 @@ describe('players leaving', () => {
   test('play again drops players who left', () => {
     const gs = table(3);
     S.startGame(gs, S.makeDeck(rng(8)));
-    gs.players[2].disconnected = true;
+    gs.players[2].left = true;
     S.removePlayer(gs, 2);
     S.resetToWaiting(gs);
     assert.deepEqual(Object.keys(gs.players), ['0', '1']);
@@ -130,9 +130,9 @@ describe('players leaving', () => {
       for (let i = 0; gs.phase === 'playing'; i++) {
         assert.ok(i < 2000, 'game did not finish');
         if (r() < 0.01) {
-          const seats = Object.keys(gs.players).map(Number).filter(s => !gs.players[s].disconnected && !gs.players[s].finished);
+          const seats = Object.keys(gs.players).map(Number).filter(s => !gs.players[s].left && !gs.players[s].finished);
           const s = seats[Math.floor(r() * seats.length)];
-          gs.players[s].disconnected = true;
+          gs.players[s].left = true;
           S.removePlayer(gs, s);
           continue;
         }

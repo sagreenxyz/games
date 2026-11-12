@@ -2,9 +2,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadScripts, rng } from './load.mjs';
 
-const ctx = loadScripts('room.js', 'poker-logic.js');
+const ctx = loadScripts('cards.js', 'room.js', 'poker-logic.js');
 const { Room, PokerLogic: P } = ctx;
-Room.init({ canSeeHand: P.canSeeHand, maxPlayers: 4 });
+Room._setLogicForTests(P);
 
 describe('room codes', () => {
   test('are always 6 unambiguous characters', () => {
@@ -24,6 +24,7 @@ describe('state sent to guests', () => {
     const gs = liveHand();
     const view = Room._redactFor(gs, 1);
     assert.equal(view.deck, undefined);
+    assert.equal(view.burned, undefined);
     assert.equal(JSON.parse(view.players[1].handJSON).length, 2);
     for (const s of [0, 2]) {
       assert.equal(view.players[s].handJSON, '[]');

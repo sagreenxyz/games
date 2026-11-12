@@ -336,7 +336,9 @@ test.describe('Poker — host + guest integration', () => {
     await expect(guestPage.locator('#lobby')).toBeVisible({ timeout: 5_000 });
     await expect(guestPage.locator('#btnNew')).toBeVisible();
     await expect(guestPage.locator('#btnJoin')).toBeVisible();
-    await expect(hostPage.locator('#opponentsRow')).toContainText('Disconnected', { timeout: 5_000 });
+    await expect(hostPage.locator('#opponentsRow')).toContainText('Left', { timeout: 5_000 });
+    // Leaving folds them out, so the host wins the hand
+    await expect(hostPage.locator('#roundOverModal')).toBeVisible({ timeout: 5_000 });
   });
 
   test('guests never receive other hands or the deck', async ({ context }) => {
@@ -366,8 +368,8 @@ test.describe('Poker — host + guest integration', () => {
     const { hostPage, guestPage } = await startHeadsUp(context);
     // Heads-up: the host (button) acts first, so the guest is out of turn.
     await expect(hostPage.locator('#turnIndicator')).toContainText(/your turn/i);
-    await guestPage.evaluate(() => Room.act({ action: 'raise', amount: -500 }));
-    await guestPage.evaluate(() => Room.act({ action: 'fold' }));
+    await guestPage.evaluate(() => Room.act({ type: 'raise', amount: -500 }));
+    await guestPage.evaluate(() => Room.act({ type: 'fold' }));
     await hostPage.waitForTimeout(500);
     await expect(hostPage.locator('#potDisplay')).toHaveText('30');
     await expect(hostPage.locator('#turnIndicator')).toContainText(/your turn/i);
@@ -381,6 +383,31 @@ test.describe('Poker — host + guest integration', () => {
     await expect(guestPage.locator('#currentBetDisplay')).toHaveText('40');
     await expect(guestPage.locator('#potDisplay')).toHaveText('60');
     await expect(guestPage.locator('#btnCall')).toHaveText('Call 20');
+  });
+
+  test('a guest who refreshes gets their seat and cards back', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+    const before = await guestPage.evaluate(() => Room.state.players[Room.mySeat].handJSON);
+    await guestPage.reload();
+    await waitForGame(guestPage);
+    await expect(guestPage.locator('#myCards .playing-card')).toHaveCount(2, { timeout: 10_000 });
+    const after = await guestPage.evaluate(() => Room.state.players[Room.mySeat].handJSON);
+    expect(after).toBe(before);
+    await expect(hostPage.locator('#opponentsRow')).not.toContainText('Reconnecting', { timeout: 10_000 });
+    // The hand carries on: host (button) can still act
+    await expect(hostPage.locator('#btnCall')).toBeEnabled();
+  });
+
+  test('when the host refreshes, the room reopens and guests reconnect', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+    const pot = await hostPage.locator('#potDisplay').textContent();
+    await hostPage.reload();
+    await waitForGame(hostPage);
+    await expect(hostPage.locator('#potDisplay')).toHaveText(pot, { timeout: 10_000 });
+    await expect(hostPage.locator('#opponentsRow')).not.toContainText('Reconnecting', { timeout: 15_000 });
+    await expect(guestPage.locator('#gameTable')).toBeVisible();
+    await hostPage.click('#btnCall');
+    await expect(guestPage.locator('#btnCheck')).toBeEnabled({ timeout: 10_000 });
   });
 
 });
