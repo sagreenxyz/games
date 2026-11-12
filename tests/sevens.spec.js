@@ -1,7 +1,5 @@
 /**
  * E2E tests: Sevens — host + guest session
- *
- * Also covers the poker lobby URL-room fix (hiding "New Room" when ?room= is present).
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
@@ -12,7 +10,6 @@ const testDir   = dirname(fileURLToPath(import.meta.url));
 const MOCK_SCRIPT = readFileSync(join(testDir, 'peerjs-mock.js'), 'utf8');
 
 const SEVENS_BASE = 'http://localhost:4321/games/sevens/';
-const POKER_BASE  = 'http://localhost:4321/games/poker/';
 
 async function openPage(context, url, label = 'Player') {
   const page = await context.newPage();
@@ -55,60 +52,6 @@ async function joinRoomAlreadyShown(page, name) {
   await page.click('#btnJoinConfirm');
 }
 
-// ─── Poker: lobby URL fix ─────────────────────────────────────────────────────
-
-test.describe('Poker — direct-link lobby fix', () => {
-
-  test('opening poker with ?room= hides the "New Room" button', async ({ context }) => {
-    // Host creates a room to get a valid code
-    const hostPage = await openPage(context, POKER_BASE, 'Host');
-    await fillName(hostPage, 'Alice');
-    await clickCreate(hostPage);
-    await waitForWaiting(hostPage);
-    const roomCode = await getRoomCode(hostPage);
-
-    // Guest opens the invite URL directly
-    const guestPage = await openPage(context, `${POKER_BASE}?room=${roomCode}`, 'Guest');
-    // "New Room" button must be hidden
-    await expect(guestPage.locator('#btnNew')).toBeHidden();
-    // "Join Room" toggle must be hidden (join fields are already shown)
-    await expect(guestPage.locator('#btnJoin')).toBeHidden();
-    // Join fields are pre-shown with the room code filled in
-    await expect(guestPage.locator('#joinFields')).toBeVisible();
-    await expect(guestPage.locator('#roomCode')).toHaveValue(roomCode.toUpperCase());
-
-    console.log('  [test] Poker direct-link hides New Room button ✅');
-  });
-
-  test('leaving the game restores full poker lobby UI', async ({ context }) => {
-    const hostPage  = await openPage(context, POKER_BASE, 'Host');
-    const guestPage = await openPage(context, POKER_BASE, 'Guest');
-
-    await fillName(hostPage, 'Alice');
-    await clickCreate(hostPage);
-    await waitForWaiting(hostPage);
-    const roomCode = await getRoomCode(hostPage);
-
-    await joinRoomViaForm(guestPage, 'Bob', roomCode);
-    await waitForWaiting(guestPage);
-    await hostPage.click('#btnStart');
-    await waitForGame(hostPage);
-    await waitForGame(guestPage);
-
-    // Guest leaves the game
-    guestPage.once('dialog', d => d.accept());
-    await guestPage.click('#btnLeaveGame');
-    await expect(guestPage.locator('#lobby')).toBeVisible({ timeout: 5_000 });
-
-    // All lobby buttons must be visible again
-    await expect(guestPage.locator('#btnNew')).toBeVisible();
-    await expect(guestPage.locator('#btnJoin')).toBeVisible();
-
-    console.log('  [test] Leaving game restores full lobby UI ✅');
-  });
-
-});
-
 // ─── Sevens ───────────────────────────────────────────────────────────────────
 
 test.describe('Sevens — host + guest integration', () => {
@@ -149,8 +92,7 @@ test.describe('Sevens — host + guest integration', () => {
     await expect(hostPage.locator('#boardRows')).toBeVisible();
     await expect(guestPage.locator('#boardRows')).toBeVisible();
 
-    // 7♦ must be on the board (it is always played automatically when 7♦ holder goes first)
-    // At least one rank cell should be the 7-start gold highlight: check board has content
+    // The board shows all 13 ranks for each suit
     const boardText = await hostPage.locator('#boardRows').textContent();
     expect(boardText).toContain('7');
 
@@ -222,6 +164,57 @@ test.describe('Sevens — host + guest integration', () => {
     await expect(hostPage.locator('#actionLogList')).not.toContainText('Actions will appear here');
 
     console.log('  [test] Sevens action log visible ✅');
+  });
+
+  test('Sevens: a guest leaving mid-game ends a 2-player game on the host', async ({ context }) => {
+    const hostPage  = await openPage(context, SEVENS_BASE, 'Host');
+    const guestPage = await openPage(context, SEVENS_BASE, 'Guest');
+
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoomViaForm(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(hostPage);
+    await waitForGame(guestPage);
+
+    guestPage.once('dialog', d => d.accept());
+    await guestPage.click('#btnLeaveGame');
+    await expect(guestPage.locator('#lobby')).toBeVisible({ timeout: 5_000 });
+
+    // Host is not stuck: the game ends with the host as the only player left
+    await expect(hostPage.locator('#gameOverModal')).toBeVisible({ timeout: 8_000 });
+    await expect(hostPage.locator('#actionLogList')).toContainText('Bob left');
+
+    // Play Again returns to the waiting room without the departed player
+    await hostPage.click('#btnPlayAgain');
+    await waitForWaiting(hostPage);
+    await expect(hostPage.locator('#playerSlots')).not.toContainText('Bob');
+  });
+
+  test('Sevens: guests only receive their own hand', async ({ context }) => {
+    const hostPage  = await openPage(context, SEVENS_BASE, 'Host');
+    const guestPage = await openPage(context, SEVENS_BASE, 'Guest');
+
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoomViaForm(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(guestPage);
+
+    const seen = await guestPage.evaluate(() => ({
+      host: JSON.parse(Room.state.players[0].handJSON).length,
+      hostCount: Room.state.players[0].handCount,
+      mine: JSON.parse(Room.state.players[Room.mySeat].handJSON).length,
+    }));
+    expect(seen.host).toBe(0);
+    expect(seen.hostCount).toBe(26);
+    expect(seen.mine).toBe(26);
   });
 
 });

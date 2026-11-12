@@ -19,7 +19,7 @@ const BASE = 'http://localhost:4321/games/poker/';
  * Open the poker page with the PeerJS library intercepted by our mock so
  * no WebRTC or external server is needed.
  */
-async function openPokerPage(context, label = 'Player') {
+async function openPokerPage(context, label = 'Player', query = '') {
   const page = await context.newPage();
   page.on('console', msg => {
     if (msg.type() === 'error') {
@@ -30,7 +30,7 @@ async function openPokerPage(context, label = 'Player') {
   await page.route('**/peerjs.min.js', async route => {
     await route.fulfill({ contentType: 'application/javascript', body: MOCK_SCRIPT });
   });
-  await page.goto(BASE);
+  await page.goto(BASE + query);
   return page;
 }
 
@@ -53,6 +53,23 @@ async function joinRoom(page, name, code) {
   await page.click('#btnJoin');
   await page.fill('#roomCode', code);
   await page.click('#btnJoinConfirm');
+}
+
+/** Host (Alice) creates a room, guest (Bob) joins, host starts a hand. */
+async function startHeadsUp(context) {
+  const hostPage  = await openPokerPage(context, 'Host');
+  const guestPage = await openPokerPage(context, 'Guest');
+  await fillName(hostPage, 'Alice');
+  await clickCreate(hostPage);
+  await waitForWaiting(hostPage);
+  const roomCode = await getRoomCode(hostPage);
+  await joinRoom(guestPage, 'Bob', roomCode);
+  await waitForWaiting(guestPage);
+  await hostPage.click('#btnStart');
+  await waitForGame(hostPage);
+  await waitForGame(guestPage);
+  await expect(guestPage.locator('#myCards .playing-card')).toHaveCount(2, { timeout: 8_000 });
+  return { hostPage, guestPage };
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -294,6 +311,76 @@ test.describe('Poker — host + guest integration', () => {
     await expect(guestPage.locator('#roundOverModal')).toBeHidden({ timeout: 5_000 });
 
     console.log('  [test] Round-over modal and Play Again ✅');
+  });
+
+  test('opening poker with ?room= hides the "New Room" button', async ({ context }) => {
+    const hostPage = await openPokerPage(context, 'Host');
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+
+    // Guest opens the invite URL directly
+    const guestPage = await openPokerPage(context, 'Guest', `?room=${roomCode}`);
+    await expect(guestPage.locator('#btnNew')).toBeHidden();
+    await expect(guestPage.locator('#btnJoin')).toBeHidden();
+    await expect(guestPage.locator('#joinFields')).toBeVisible();
+    await expect(guestPage.locator('#roomCode')).toHaveValue(roomCode.toUpperCase());
+  });
+
+  test('leaving the game restores full poker lobby UI', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+
+    guestPage.once('dialog', d => d.accept());
+    await guestPage.click('#btnLeaveGame');
+    await expect(guestPage.locator('#lobby')).toBeVisible({ timeout: 5_000 });
+    await expect(guestPage.locator('#btnNew')).toBeVisible();
+    await expect(guestPage.locator('#btnJoin')).toBeVisible();
+    await expect(hostPage.locator('#opponentsRow')).toContainText('Disconnected', { timeout: 5_000 });
+  });
+
+  test('guests never receive other hands or the deck', async ({ context }) => {
+    const { guestPage } = await startHeadsUp(context);
+    const seen = await guestPage.evaluate(() => ({
+      deck: Room.state.deck,
+      host: JSON.parse(Room.state.players[0].handJSON).length,
+      hostCount: Room.state.players[0].handCount,
+      mine: JSON.parse(Room.state.players[Room.mySeat].handJSON).length,
+    }));
+    expect(seen.deck).toBeUndefined();
+    expect(seen.host).toBe(0);
+    expect(seen.hostCount).toBe(2);
+    expect(seen.mine).toBe(2);
+    await expect(guestPage.locator('#opponentsRow .playing-card.back')).toHaveCount(2);
+  });
+
+  test('host leaving sends guests back to the lobby with a message', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+    hostPage.once('dialog', d => d.accept());
+    await hostPage.click('#btnLeaveGame');
+    await expect(guestPage.locator('#lobby')).toBeVisible({ timeout: 8_000 });
+    await expect(guestPage.locator('#lobbyError')).toContainText('host closed the room');
+  });
+
+  test('host rejects an out-of-turn action sent by a guest', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+    // Heads-up: the host (button) acts first, so the guest is out of turn.
+    await expect(hostPage.locator('#turnIndicator')).toContainText(/your turn/i);
+    await guestPage.evaluate(() => Room.act({ action: 'raise', amount: -500 }));
+    await guestPage.evaluate(() => Room.act({ action: 'fold' }));
+    await hostPage.waitForTimeout(500);
+    await expect(hostPage.locator('#potDisplay')).toHaveText('30');
+    await expect(hostPage.locator('#turnIndicator')).toContainText(/your turn/i);
+  });
+
+  test('raise uses the "raise by" amount on top of the call', async ({ context }) => {
+    const { hostPage, guestPage } = await startHeadsUp(context);
+    // Host is the button/SB: 10 to call, minimum raise 20 → raises to 40
+    await expect(hostPage.locator('#raiseAmount')).toHaveValue('20');
+    await hostPage.click('#btnRaise');
+    await expect(guestPage.locator('#currentBetDisplay')).toHaveText('40');
+    await expect(guestPage.locator('#potDisplay')).toHaveText('60');
+    await expect(guestPage.locator('#btnCall')).toHaveText('Call 20');
   });
 
 });

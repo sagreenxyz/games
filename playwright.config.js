@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  testMatch: '*.spec.js', // unit tests in tests/unit run with `npm run test:unit`
   timeout: 60_000,
   expect: { timeout: 15_000 },
   // Tests must run sequentially: each test uses multiple pages in the SAME
@@ -24,15 +25,11 @@ export default defineConfig({
     },
   ],
 
-  /** Start a local PeerJS signalling server before tests */
-  globalSetup: './tests/global-setup.js',
-  globalTeardown: './tests/global-teardown.js',
-
   webServer: {
     command: 'npm run dev -- --port 4321',
     url: 'http://localhost:4321/games/poker/',
-    // Always reuse an already-running dev server (avoids port conflicts)
-    reuseExistingServer: true,
+    // Reuse a running dev server locally; always start a fresh one in CI
+    reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
 });
