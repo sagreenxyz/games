@@ -24,7 +24,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 
 ### Texas Hold'em Poker
 
-Classic Texas Hold'em for **2–4 human players**. No computer opponents — you need real people. One player creates a room and shares the code or invite link; others join and the host starts the game.
+Classic Texas Hold'em for **2–6 human players**. No computer opponents — you need real people. One player creates a room and shares the code or invite link; others join and the host starts the game.
 
 ### Sevens (Fan Tan)
 
@@ -281,13 +281,18 @@ games/
 │   ├── favicon.svg
 │   ├── peerjs.min.js                ← PeerJS 1.5.5 (local copy — `npm run vendor:peerjs`)
 │   ├── qrcode.min.js                ← QRCode.js (local copy — no CDN)
-│   ├── room.js                      ← shared: PeerJS host/guest, lobby, waiting room, redaction
+│   ├── cards.js                     ← shared: deck, ranks, sorting, card HTML
+│   ├── room.js                      ← shared: PeerJS host/guest, lobby, waiting room, redaction, rejoin
 │   ├── poker-logic.js               ← Hold'em rules engine (no DOM) — PokerLogic
 │   ├── poker-game.js                ← Poker UI + host orchestration
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │
 ├── src/
+│   ├── components/
+│   │   └── GameRoom.astro           ← lobby + waiting room shell for multiplayer games
+│   ├── data/
+│   │   └── games.ts                 ← game registry (home page + nav)
 │   ├── layouts/
 │   │   └── Layout.astro             ← shared HTML shell, header, footer
 │   ├── pages/
@@ -449,7 +454,7 @@ The project is designed to be extended with new games:
 | **Mobile support** | The UI is responsive but best enjoyed on a tablet or desktop screen. |
 | **Browser compatibility** | Requires a modern browser with WebRTC support (Chrome, Firefox, Edge, Safari 15+). |
 | **PeerJS signalling** | If the PeerJS cloud is down, rooms cannot be created or joined. Self-host a PeerJS server and set `window.PEER_CONFIG` to work around this. |
-| **Room persistence** | Rooms exist only while the host's browser is open. Closing the host tab ends the session. |
+| **Room persistence** | Refreshing is safe: guests get their seat back and a refreshing host reopens the room (players have 45 seconds to come back). Closing the host's tab ends the room. |
 
 ---
 

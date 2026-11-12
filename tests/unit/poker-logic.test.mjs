@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadScripts, rng } from './load.mjs';
 
-const P = loadScripts('poker-logic.js').PokerLogic;
+const P = loadScripts('cards.js', 'poker-logic.js').PokerLogic;
 
 /** Parse "A♠ K♥ 10♦" into card objects. */
 const cards = str => str.trim().split(/\s+/).map(t => ({ r: t.slice(0, -1), s: t.slice(-1) }));
@@ -115,6 +115,7 @@ describe('dealing and blinds', () => {
     const gs = table(2);
     P.startHand(gs, P.makeDeck(rng(7)));
     gs.players[1].disconnected = true;
+    gs.players[1].left = true;
     act(gs, 'fold');
     assert.equal(P.startHand(gs), false);
     assert.equal(gs.phase, 'waiting');
@@ -177,6 +178,31 @@ describe('action validation', () => {
   });
 });
 
+describe('reconnecting players', () => {
+  test('a player who is reconnecting sits out the next hand but keeps their seat', () => {
+    const gs = table(3);
+    P.startHand(gs, P.makeDeck(rng(30)));
+    gs.players[2].disconnected = true;
+    P.startHand(gs, P.makeDeck(rng(31)));
+    assert.equal(gs.players[2].active, false);
+    assert.equal(gs.players[2].handJSON, '[]');
+    assert.ok(gs.players[2]);
+    gs.players[2].disconnected = false;
+    P.startHand(gs, P.makeDeck(rng(32)));
+    assert.equal(gs.players[2].active, true);
+  });
+
+  test('removing a player who is not to act folds them without moving the turn', () => {
+    const gs = table(4);
+    P.startHand(gs, P.makeDeck(rng(33)));
+    const current = gs.currentPlayer;
+    const other = [0, 1, 2, 3].find(s => s !== current);
+    P.removePlayer(gs, other);
+    assert.equal(gs.players[other].folded, true);
+    assert.equal(gs.currentPlayer, current);
+  });
+});
+
 describe('turn order', () => {
   test('after a fold, action passes to the next seat clockwise', () => {
     const gs = table(4);
@@ -226,7 +252,7 @@ describe('all-in', () => {
     act(gs, 'raise', 999); // seat 1 all-in for 500
     assert.equal(gs.phase, 'pre-flop');
     assert.equal(gs.currentPlayer, 0);
-    assert.equal(P.legalActions(gs, 0).canCall, true);
+    assert.equal(P.bettingOptions(gs, 0).canCall, true);
   });
 
   test('side pots: a short all-in can only win what it matched', () => {
@@ -278,7 +304,7 @@ describe('fuzz: random legal play', () => {
       for (let step = 0; gs.phase !== 'showdown'; step++) {
         assert.ok(step < 200, 'hand did not finish');
         const seat = gs.currentPlayer;
-        const legal = P.legalActions(gs, seat);
+        const legal = P.bettingOptions(gs, seat);
         assert.ok(legal.canAct, `stalled in ${gs.phase}: seat ${seat} cannot act`);
         const options = ['fold'];
         if (legal.canCheck) options.push('check', 'check');

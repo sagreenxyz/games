@@ -1,12 +1,14 @@
 ---
 import '../styles/global.css';
+import { games } from '../data/games';
 
 interface Props {
   title: string;
   description?: string;
 }
-const { title, description = 'A library of multiplayer browser games' } = Astro.props;
-const base = import.meta.env.BASE_URL.replace(/\/$/, ''); // strip trailing slash
+const { title, description = 'A library of multiplayer browser card games' } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const current = Astro.url.pathname.replace(/\/$/, '');
 ---
 <!doctype html>
 <html lang="en">
@@ -18,19 +20,18 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, ''); // strip trailing slas
   <title>{title} – Games Library</title>
 </head>
 <body>
-  <header style="background:rgba(0,0,0,.35);padding:.8rem 1.5rem;display:flex;align-items:center;gap:1rem;border-bottom:1px solid rgba(255,255,255,.1);">
-    <a href={`${base}/`} style="font-size:1.3rem;font-weight:800;color:var(--gold);text-decoration:none;">🎮 Games Library</a>
-    <nav style="margin-left:auto;display:flex;gap:1rem;">
+  <header class="site-header">
+    <a href={`${base}/`} class="brand">🎮 Games Library</a>
+    <nav class="site-nav" aria-label="Games">
       <a href={`${base}/`}>Home</a>
-      <a href={`${base}/poker`}>Poker</a>
-      <a href={`${base}/sevens`}>Sevens</a>
+      {games.map(g => (
+        <a href={`${base}/${g.slug}`} aria-current={current === `${base}/${g.slug}` ? 'page' : undefined}>{g.name}</a>
+      ))}
     </nav>
   </header>
   <main>
     <slot />
   </main>
-  <footer style="text-align:center;padding:1.5rem;font-size:.8rem;color:rgba(255,255,255,.4);border-top:1px solid rgba(255,255,255,.08);margin-top:3rem;">
-    Games Library — open to all, no login required
-  </footer>
+  <footer class="site-footer">Games Library — open to all, no login required</footer>
 </body>
 </html>

@@ -1,28 +1,34 @@
 /**
- * room.js — shared multiplayer room layer for all games.
+ * room.js — shared multiplayer room layer for every multiplayer game.
  *
- * Handles everything that is the same across games: PeerJS host/guest
- * connections, the lobby and waiting-room UI, invite link + QR code, seat
- * assignment, per-player state redaction, and leaving.
+ * Handles PeerJS host/guest connections, the lobby and waiting room, invite
+ * link + QR code, seat assignment, applying actions through the game's rules
+ * engine, per-player state redaction, rejoining after a refresh, and leaving.
  *
- * A game page loads peerjs.min.js, qrcode.min.js, room.js, its own
- * <game>-logic.js, then <game>-game.js, which calls Room.init(config).
+ * Load order on a game page: peerjs.min.js, qrcode.min.js, cards.js, room.js,
+ * <game>-logic.js, <game>-game.js (which calls Room.init).
  *
  * Trust model: the host browser is authoritative. Guests only ever receive a
- * redacted copy of the state — other players' hands (unless the game says
- * they are revealed) and the deck are stripped before sending.
+ * redacted copy of the state: the game's `hiddenFields` (e.g. the deck) are
+ * removed, and other players' hands are blanked unless the game reveals them.
  *
- * Config passed to Room.init():
- *   maxPlayers                     number of seats
- *   freshRoomState(code)           → initial state object (phase 'waiting')
- *   freshPlayer(name)              → player object for a newly seated player
- *   onStart(gs)                    host clicked Start (≥2 players seated)
- *   onAction(seat, payload)        host: apply an action from `seat`
- *   onPlayerLeft(gs, seat)         host: a seated player left mid-game; mutate gs
- *   render(gs)                     render the in-game view (phase !== 'waiting')
- *   onHostState(gs)  [optional]    host: called after every host state change
- *   canSeeHand(gs, viewer, owner)  [optional] → true to reveal owner's hand
- *   onLeave()        [optional]    clear game timers when returning to lobby
+ * ── Rules engine interface (`logic`) ──
+ *   id, minPlayers, maxPlayers, hiddenFields?: string[]
+ *   create(code) → state with phase 'waiting' and players {}
+ *   freshPlayer(name) → player object
+ *   start(gs, rng?) → boolean        deal / begin (from 'waiting' or between games)
+ *   apply(gs, seat, action) → { ok, error? }   never mutates on error
+ *   legalActions(gs, seat) → action[]          (used by tests and some UIs)
+ *   removePlayer(gs, seat)           a player is gone for good mid-game
+ *   canSeeHand?(gs, viewer, owner) → boolean
+ *   seatNote?(seat, nPlayers) → string          e.g. team name in the waiting room
+ *
+ * ── Room.init(config) ──
+ *   logic, render(gs)
+ *   onHostState?(gs)   host: after every state change (timers, auto-advance)
+ *   onError?(message)  an action of ours was rejected
+ *   onLeave?()         back to the lobby — clear timers / local UI state
+ *   rejoinGraceMs?     how long a disconnected player keeps their seat (default 45 s)
  */
 (function () {
   'use strict';
@@ -30,72 +36,99 @@
   const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
   const CODE_LENGTH = 6;
   const MAX_NAME_LENGTH = 20;
+  const RETRY_MS = 2000;
 
   let cfg = null;
-  let peer = null;        // our PeerJS Peer
-  let hostConn = null;    // guest → host connection
-  let peerConns = [];     // host → guest connections
+  let logic = null;
+  let peer = null;          // our PeerJS Peer
+  let hostConn = null;      // guest → host connection
+  let peerConns = [];       // host → guest connections
   const connSeatMap = new Map();
-  let view = 'lobby';     // 'lobby' | 'waiting' | 'game'
+  const seatTokens = new Map();   // host: seat → rejoin token (never sent to other guests)
+  const graceTimers = new Map();  // host: seat → timeout id
+  let view = 'lobby';       // 'lobby' | 'waiting' | 'game'
+  let guestMode = null;     // null | 'joining' | 'connected' | 'reconnecting'
+  let myToken = null;
+  let reconnectDeadline = 0;
+  let retryTimer = null;
+  let hostClosed = false;
 
-  /* ───────────── DOM / misc helpers (shared with games) ───────────── */
+  /* ───────────── helpers ───────────── */
   const el = id => document.getElementById(id);
   const show = id => el(id)?.classList.remove('hidden');
   const hide = id => el(id)?.classList.add('hidden');
   const setHTML = (id, html) => { const e = el(id); if (e) e.innerHTML = html; };
   const setText = (id, txt) => { const e = el(id); if (e) e.textContent = txt; };
   const setLobbyError = msg => setText('lobbyError', msg);
+  const escHtml = s => Cards.esc(s);
+  const safeParseJSON = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
 
-  function escHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function safeParseJSON(s, fallback) {
-    try { return JSON.parse(s); } catch { return fallback; }
-  }
-
-  /** Number of cards a player holds, whether or not the hand is visible. */
   function handSize(p) {
     if (!p) return 0;
     if (typeof p.handCount === 'number') return p.handCount;
     return safeParseJSON(p.handJSON, []).length;
   }
 
-  /** Random fixed-length room code (always exactly CODE_LENGTH chars). */
-  function genCode() {
-    const bytes = new Uint8Array(CODE_LENGTH);
+  function randomString(len, alphabet = CODE_ALPHABET) {
+    const bytes = new Uint8Array(len);
     crypto.getRandomValues(bytes);
-    return Array.from(bytes, b => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+    return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
   }
+  const genCode = () => randomString(CODE_LENGTH);
 
   function cleanName(raw) {
-    if (typeof raw !== 'string') return '';
-    return raw.trim().slice(0, MAX_NAME_LENGTH);
+    return typeof raw === 'string' ? raw.trim().slice(0, MAX_NAME_LENGTH) : '';
   }
 
-  /** PeerJS options; set window.PEER_CONFIG before scripts load to override. */
   function peerConfig() { return window.PEER_CONFIG || {}; }
+  const graceMs = () => cfg.rejoinGraceMs ?? 45000;
 
-  /* ───────────── Views ───────────── */
+  /* ───────────── session (survives a page refresh, not closing the tab) ───────────── */
+  const sessionKey = () => `games:session:${window.location.pathname}`;
+  function saveSession(data) {
+    try { sessionStorage.setItem(sessionKey(), JSON.stringify(data)); } catch { /* storage unavailable */ }
+  }
+  function loadSession() {
+    try { return JSON.parse(sessionStorage.getItem(sessionKey()) || 'null'); } catch { return null; }
+  }
+  function clearSession() {
+    try { sessionStorage.removeItem(sessionKey()); } catch { /* ignore */ }
+  }
+  function saveHostSession() {
+    if (!Room.amHost || !Room.state) return;
+    saveSession({ role: 'host', room: Room.myRoomCode, name: Room.myName, state: Room.state, tokens: [...seatTokens] });
+  }
+
+  /* ───────────── banner (connection status) ───────────── */
+  function banner(msg) {
+    let b = el('roomBanner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'roomBanner';
+      b.className = 'room-banner hidden';
+      b.setAttribute('role', 'status');
+      document.body.appendChild(b);
+    }
+    b.textContent = msg || '';
+    b.classList.toggle('hidden', !msg);
+  }
+
+  /* ───────────── views ───────────── */
   function showView(name) {
     hide('lobby'); hide('waitingRoom'); hide('gameTable');
     show(name === 'lobby' ? 'lobby' : name === 'waiting' ? 'waitingRoom' : 'gameTable');
     view = name;
   }
 
-  /* ───────────── State distribution ───────────── */
-
-  /** Copy of gs safe to send to `viewerSeat`: hidden hands and deck removed. */
+  /* ───────────── state distribution ───────────── */
   function redactFor(gs, viewerSeat) {
     const copy = structuredClone(gs);
-    delete copy.deck;
-    for (const [key, p] of Object.entries(copy.players || {})) {
+    for (const f of (logic.hiddenFields || ['deck'])) delete copy[f];
+    for (const [k, p] of Object.entries(copy.players || {})) {
       if (!p) continue;
-      const seat = Number(key);
+      const seat = Number(k);
       p.handCount = handSize(p);
-      const visible = seat === viewerSeat || (cfg.canSeeHand && cfg.canSeeHand(gs, viewerSeat, seat));
+      const visible = seat === viewerSeat || (logic.canSeeHand && logic.canSeeHand(gs, viewerSeat, seat));
       if (!visible) p.handJSON = '[]';
     }
     return copy;
@@ -105,23 +138,28 @@
     try { if (conn.open) conn.send(msg); } catch (err) { console.warn('Send failed:', err); }
   }
 
-  /** Host: send each guest its own redacted view of gs. */
   function broadcastState(gs, excludeConn = null) {
     for (const conn of peerConns) {
       if (conn === excludeConn) continue;
       const seat = connSeatMap.get(conn);
-      if (seat === undefined) continue;
-      sendTo(conn, { type: 'state', state: redactFor(gs, seat) });
+      if (seat !== undefined) sendTo(conn, { type: 'state', state: redactFor(gs, seat) });
     }
   }
 
-  /** Host: commit a new state, send it to every guest, and re-render locally. */
-  function pushState(gs) {
-    if (!Room.amHost) return;
+  /** Host: commit state, send each guest their view, re-render, persist. */
+  function pushState(gs = Room.state) {
+    if (!Room.amHost || !gs) return;
     Room.state = gs;
     gs.updatedAt = Date.now();
     broadcastState(gs);
     onStateChange(gs);
+    saveHostSession();
+  }
+
+  /** Host: run `fn(state)` then push. Return false from fn to skip the push. */
+  function update(fn) {
+    if (!Room.amHost || !Room.state) return;
+    if (fn(Room.state) !== false) pushState(Room.state);
   }
 
   function onStateChange(gs) {
@@ -135,37 +173,58 @@
     }
   }
 
-  /** Route a player action: host applies it directly, a guest sends it to the host. */
-  function act(payload) {
-    if (!Room.state) return;
-    if (Room.amHost) cfg.onAction(Room.mySeat, payload);
-    else if (hostConn?.open) hostConn.send({ type: 'action', ...payload });
+  function applyAction(seat, action, replyConn) {
+    const gs = Room.state;
+    if (!gs || !action || typeof action !== 'object') return;
+    const res = logic.apply(gs, seat, action);
+    if (res.ok) { pushState(gs); return; }
+    if (replyConn) sendTo(replyConn, { type: 'actionError', message: res.error });
+    else cfg.onError?.(res.error);
   }
 
-  /* ───────────── Hosting ───────────── */
+  /** Play an action: the host applies it, a guest sends it to the host. */
+  function act(action) {
+    if (!Room.state) return;
+    if (Room.amHost) applyAction(Room.mySeat, action, null);
+    else if (hostConn?.open) hostConn.send({ type: 'action', action });
+  }
+
+  /* ───────────── hosting ───────────── */
   function createRoom() {
     Room.myName = cleanName(el('playerName')?.value);
     if (!Room.myName) { setLobbyError('Please enter your name.'); return; }
-    if (peer) return; // already creating / connecting
-    Room.mySeat = 0;
+    if (peer) return;
     Room.amHost = true;
+    Room.mySeat = 0;
     setLobbyError('Creating room…');
-    openHostPeer();
+    openHostPeer(genCode(), null);
   }
 
-  function openHostPeer() {
-    const code = genCode();
+  /** Open the host peer. `resume` = saved session to restore after a refresh. */
+  function openHostPeer(code, resume, attempt = 0) {
     peer = new Peer(code, peerConfig());
 
     peer.on('open', id => {
       Room.myRoomCode = id;
-      const gs = cfg.freshRoomState(id);
-      gs.players[0] = cfg.freshPlayer(Room.myName);
-      gs.hostSeat = 0;
+      let gs;
+      if (resume) {
+        gs = resume.state;
+        for (const [seat, token] of resume.tokens || []) seatTokens.set(seat, token);
+        // Everyone else has to reconnect; hold their seats for the grace period.
+        for (const k of Object.keys(gs.players)) {
+          const seat = Number(k);
+          if (seat !== Room.mySeat && gs.players[seat] && !gs.players[seat].left) markDisconnected(gs, seat);
+        }
+        banner('');
+      } else {
+        gs = logic.create(id);
+        gs.players[0] = logic.freshPlayer(Room.myName);
+        gs.hostSeat = 0;
+      }
       Room.state = gs;
       setLobbyError('');
       enterRoomUI(id);
-      onStateChange(gs);
+      pushState(gs);
     });
 
     peer.on('connection', handleNewPeerConnection);
@@ -173,119 +232,223 @@
     peer.on('error', err => {
       if (err.type === 'unavailable-id') {
         peer.destroy();
-        openHostPeer(); // code collision — try another
-      } else {
+        if (resume) {
+          // Our old connection may not have been released yet — keep trying.
+          if (attempt > 20) { failResume('Could not reopen the room.'); return; }
+          banner('Reopening your room…');
+          setTimeout(() => openHostPeer(code, resume, attempt + 1), 1500);
+        } else {
+          openHostPeer(genCode(), null); // code collision — try another
+        }
+      } else if (!Room.state) {
         setLobbyError(`Could not create room: ${err.type}`);
-        peer.destroy();
-        peer = null;
-        Room.amHost = false;
-        Room.mySeat = -1;
+        peer.destroy(); peer = null;
+        Room.amHost = false; Room.mySeat = -1;
+        banner('');
+      } else {
+        console.warn('Peer error:', err.type);
       }
     });
+
+    peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
   }
+
+  function failResume(msg) {
+    clearSession();
+    goToLobby();
+    setLobbyError(msg);
+  }
+
+  function seatedPlayers(gs) {
+    return Object.keys(gs.players || {}).map(Number).filter(s => gs.players[s] && !gs.players[s].isEmpty);
+  }
+  const connectedCount = gs => seatedPlayers(gs).filter(s => !gs.players[s].disconnected).length;
 
   function handleNewPeerConnection(conn) {
     conn.on('data', msg => {
       if (!msg || typeof msg !== 'object') return;
       const gs = Room.state;
-
-      if (msg.type === 'join') {
-        const reject = message => { sendTo(conn, { type: 'error', message }); setTimeout(() => conn.close(), 50); };
-        if (!gs) return reject('Room not ready.');
-        if (gs.phase !== 'waiting') return reject('Game already in progress.');
-        if (connSeatMap.has(conn)) return; // duplicate join
-        const name = cleanName(msg.name);
-        if (!name) return reject('Please enter a valid name.');
-        const taken = Object.values(gs.players).some(
-          p => p && !p.isEmpty && p.name.toLowerCase() === name.toLowerCase()
-        );
-        if (taken) return reject(`The name "${name}" is already taken. Please choose a different name.`);
-        let seat = -1;
-        for (let i = 0; i < cfg.maxPlayers; i++) {
-          if (!gs.players[i] || gs.players[i].isEmpty) { seat = i; break; }
-        }
-        if (seat === -1) return reject(`Room is full (${cfg.maxPlayers} players).`);
-
-        connSeatMap.set(conn, seat);
-        peerConns.push(conn);
-        gs.players[seat] = cfg.freshPlayer(name);
-        sendTo(conn, { type: 'joined', seat, state: redactFor(gs, seat) });
-        broadcastState(gs, conn);
-        onStateChange(gs);
-
-      } else if (msg.type === 'action') {
-        // The seat comes from the connection, never from the message.
-        const seat = connSeatMap.get(conn);
-        if (gs && seat !== undefined) cfg.onAction(seat, msg);
-
-      } else if (msg.type === 'leave') {
-        handlePeerDisconnect(conn);
-      }
+      if (msg.type === 'join') handleJoin(conn, msg, gs);
+      else if (msg.type === 'action') {
+        const seat = connSeatMap.get(conn); // the seat comes from the connection, never the message
+        if (gs && seat !== undefined) applyAction(seat, msg.action, conn);
+      } else if (msg.type === 'leave') handlePeerLeft(conn, true);
     });
-
-    conn.on('close', () => handlePeerDisconnect(conn));
-    conn.on('error', () => handlePeerDisconnect(conn));
+    conn.on('close', () => handlePeerLeft(conn, false));
+    conn.on('error', () => handlePeerLeft(conn, false));
   }
 
-  function handlePeerDisconnect(conn) {
-    peerConns = peerConns.filter(c => c !== conn);
-    const seat = connSeatMap.get(conn);
-    connSeatMap.delete(conn);
-    const gs = Room.state;
-    if (!gs || seat === undefined || !gs.players[seat]) return;
+  function attachConn(conn, seat) {
+    for (const [c, s] of connSeatMap) if (s === seat && c !== conn) { connSeatMap.delete(c); peerConns = peerConns.filter(x => x !== c); }
+    connSeatMap.set(conn, seat);
+    if (!peerConns.includes(conn)) peerConns.push(conn);
+  }
+
+  function handleJoin(conn, msg, gs) {
+    const reject = message => { sendTo(conn, { type: 'error', message }); setTimeout(() => conn.close(), 50); };
+    if (!gs) return reject('Room not ready.');
+    if (connSeatMap.has(conn)) return;
+
+    // Rejoin with a token: take the old seat back.
+    if (typeof msg.token === 'string') {
+      const seat = [...seatTokens].find(([, t]) => t === msg.token)?.[0];
+      const p = seat !== undefined ? gs.players[seat] : null;
+      if (p && !p.left) {
+        clearTimeout(graceTimers.get(seat)); graceTimers.delete(seat);
+        attachConn(conn, seat);
+        p.disconnected = false;
+        sendTo(conn, { type: 'joined', seat, token: msg.token, state: redactFor(gs, seat) });
+        pushState(gs);
+        return;
+      }
+      if (gs.phase !== 'waiting') return reject('Your seat was given up after you disconnected.');
+    }
+
+    if (gs.phase !== 'waiting') return reject('Game already in progress.');
+    const name = cleanName(msg.name);
+    if (!name) return reject('Please enter a valid name.');
+    if (seatedPlayers(gs).some(s => gs.players[s].name.toLowerCase() === name.toLowerCase())) {
+      return reject(`The name "${name}" is already taken. Please choose a different name.`);
+    }
+    let seat = -1;
+    for (let i = 0; i < logic.maxPlayers; i++) if (!gs.players[i] || gs.players[i].isEmpty) { seat = i; break; }
+    if (seat === -1) return reject(`Room is full (${logic.maxPlayers} players).`);
+
+    const token = randomString(24);
+    seatTokens.set(seat, token);
+    attachConn(conn, seat);
+    gs.players[seat] = logic.freshPlayer(name);
+    sendTo(conn, { type: 'joined', seat, token, state: redactFor(gs, seat) });
+    pushState(gs);
+  }
+
+  function markDisconnected(gs, seat) {
+    gs.players[seat].disconnected = true;
+    clearTimeout(graceTimers.get(seat));
+    graceTimers.set(seat, setTimeout(() => {
+      graceTimers.delete(seat);
+      const cur = Room.state;
+      if (cur?.players[seat]?.disconnected) removeSeat(cur, seat);
+    }, graceMs()));
+  }
+
+  /** A seat is gone for good. */
+  function removeSeat(gs, seat) {
+    clearTimeout(graceTimers.get(seat)); graceTimers.delete(seat);
+    seatTokens.delete(seat);
+    if (!gs.players[seat]) return;
     if (gs.phase === 'waiting') {
       delete gs.players[seat];
-      pushState(gs);
     } else {
       gs.players[seat].disconnected = true;
-      cfg.onPlayerLeft(gs, seat); // game decides what happens; it calls pushState
+      gs.players[seat].left = true;
+      logic.removePlayer(gs, seat);
     }
+    pushState(gs);
   }
 
-  /* ───────────── Joining ───────────── */
+  /** A guest connection closed (`intentional` = they clicked Leave). */
+  function handlePeerLeft(conn, intentional) {
+    const seat = connSeatMap.get(conn);
+    if (seat === undefined) return;
+    connSeatMap.delete(conn);
+    peerConns = peerConns.filter(c => c !== conn);
+    const gs = Room.state;
+    if (!gs || !gs.players[seat]) return;
+    if (intentional || gs.phase === 'waiting') { removeSeat(gs, seat); return; }
+    markDisconnected(gs, seat);
+    pushState(gs);
+  }
+
+  /* ───────────── joining ───────────── */
   function joinRoom() {
     Room.myName = cleanName(el('playerName')?.value);
     const code = (el('roomCode')?.value || '').trim().toUpperCase();
     if (!Room.myName) { setLobbyError('Please enter your name.'); return; }
     if (code.length !== CODE_LENGTH) { setLobbyError(`Room code must be ${CODE_LENGTH} characters.`); return; }
-    if (peer) return; // already connecting
+    if (peer) return;
+    startGuest(code, null);
+  }
 
+  function startGuest(code, token) {
     Room.myRoomCode = code;
     Room.amHost = false;
-    setLobbyError('Connecting…');
+    myToken = token;
+    hostClosed = false;
+    guestMode = token ? 'reconnecting' : 'joining';
+    if (token) reconnectDeadline = Date.now() + graceMs();
+    setLobbyError(token ? '' : 'Connecting…');
+    openGuestPeer();
+  }
 
+  function openGuestPeer() {
     peer = new Peer(peerConfig());
-    peer.on('open', () => {
-      hostConn = peer.connect(code, { serialization: 'json', reliable: true });
-      hostConn.on('open', () => hostConn.send({ type: 'join', name: Room.myName }));
-      hostConn.on('data', handleHostMessage);
-      hostConn.on('close', () => {
-        if (view !== 'lobby') {
-          goToLobby();
-          setLobbyError('The host closed the room.');
-        } else if (peer) {
-          // Rejected or dropped before seating — allow another attempt
-          peer.destroy();
-          peer = null;
-          hostConn = null;
-        }
-      });
-      hostConn.on('error', err => setLobbyError(`Connection error: ${err}`));
-    });
-
+    peer.on('open', connectToHost);
     peer.on('error', err => {
+      if (guestMode === 'reconnecting') { scheduleRetry(); return; }
       setLobbyError(err.type === 'peer-unavailable' ? 'Room not found. Check the code.' : `Error: ${err.type}`);
-      peer?.destroy();
-      peer = null;
-      hostConn = null;
-      Room.myRoomCode = '';
+      resetGuest();
     });
+    peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
+  }
+
+  function connectToHost() {
+    if (!peer || peer.destroyed) return;
+    const conn = peer.connect(Room.myRoomCode, { serialization: 'json', reliable: true });
+    hostConn = conn;
+    conn.on('open', () => conn.send({ type: 'join', name: Room.myName, token: myToken || undefined }));
+    conn.on('data', msg => { if (conn === hostConn) handleHostMessage(msg); });
+    conn.on('close', () => { if (conn === hostConn) onHostConnClosed(); });
+    conn.on('error', () => { if (conn === hostConn) onHostConnClosed(); });
+  }
+
+  function onHostConnClosed() {
+    hostConn = null;
+    if (hostClosed) {
+      goToLobby();
+      setLobbyError('The host closed the room.');
+    } else if (guestMode === 'connected' || guestMode === 'reconnecting') {
+      if (guestMode === 'connected') reconnectDeadline = Date.now() + graceMs();
+      guestMode = 'reconnecting';
+      scheduleRetry();
+    } else if (view === 'lobby') {
+      resetGuest(); // rejected before being seated — allow another attempt
+    }
+  }
+
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    if (Date.now() > reconnectDeadline) {
+      clearSession();
+      goToLobby();
+      setLobbyError('Lost connection to the room.');
+      return;
+    }
+    banner('Connection lost — reconnecting…');
+    retryTimer = setTimeout(() => {
+      if (guestMode !== 'reconnecting') return;
+      if (!peer || peer.destroyed) openGuestPeer();
+      else if (peer.disconnected) { peer.reconnect(); scheduleRetry(); }
+      else connectToHost();
+    }, RETRY_MS);
+  }
+
+  function resetGuest() {
+    const p = peer;
+    peer = null; hostConn = null; guestMode = null;
+    Room.myRoomCode = '';
+    p?.destroy();
   }
 
   function handleHostMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'joined') {
+      guestMode = 'connected';
+      clearTimeout(retryTimer);
+      banner('');
       Room.mySeat = msg.seat;
+      myToken = msg.token;
+      saveSession({ role: 'guest', room: Room.myRoomCode, name: Room.myName, token: msg.token });
       Room.state = msg.state;
       setLobbyError('');
       enterRoomUI(Room.myRoomCode);
@@ -293,16 +456,21 @@
     } else if (msg.type === 'state') {
       Room.state = msg.state;
       onStateChange(msg.state);
+    } else if (msg.type === 'actionError') {
+      cfg.onError?.(msg.message);
+    } else if (msg.type === 'closed') {
+      hostClosed = true;
     } else if (msg.type === 'error') {
-      const p = peer;
-      peer = null; hostConn = null;
-      Room.myRoomCode = ''; Room.mySeat = -1;
-      p?.destroy();
+      const wasRejoin = guestMode === 'reconnecting';
+      clearSession();
+      if (wasRejoin) { goToLobby(); setLobbyError(msg.message); return; }
+      resetGuest();
+      Room.mySeat = -1;
       setLobbyError(msg.message);
     }
   }
 
-  /* ───────────── Waiting room ───────────── */
+  /* ───────────── waiting room ───────────── */
   function enterRoomUI(code) {
     setText('displayRoomCode', code);
     setText('tableRoomCode', code);
@@ -322,65 +490,78 @@
     }
   }
 
-  function seatedCount(gs) {
-    return Object.values(gs.players || {}).filter(p => p && !p.isEmpty).length;
+  function playerRange() {
+    const { minPlayers: lo, maxPlayers: hi } = logic;
+    return lo === hi ? `exactly ${lo} players` : `${lo}–${hi} players`;
   }
 
   function updateWaitingRoom(gs) {
     const players = gs.players || {};
     let html = '';
-    for (let i = 0; i < cfg.maxPlayers; i++) {
+    for (let i = 0; i < logic.maxPlayers; i++) {
       const p = players[i];
+      const note = logic.seatNote ? logic.seatNote(i, logic.maxPlayers) : '';
+      const noteBadge = note ? `<span class="badge badge-gray" style="margin-left:auto;">${escHtml(note)}</span>` : '';
       if (p && !p.isEmpty) {
-        const hostBadge = i === gs.hostSeat ? '<span class="badge badge-gold" style="margin-left:.5rem;">Host</span>' : '';
-        const selfBadge = i === Room.mySeat ? '<span class="badge badge-green" style="margin-left:.5rem;">You</span>' : '';
-        html += `<div style="display:flex;align-items:center;gap:.5rem;background:rgba(0,0,0,.2);padding:.6rem .9rem;border-radius:8px;">
-          <span>🧑 Seat ${i + 1}: <strong>${escHtml(p.name)}</strong></span>${hostBadge}${selfBadge}
-        </div>`;
+        const hostBadge = i === gs.hostSeat ? '<span class="badge badge-gold">Host</span>' : '';
+        const selfBadge = i === Room.mySeat ? '<span class="badge badge-green">You</span>' : '';
+        const away = p.disconnected ? '<span class="badge badge-gray">Reconnecting…</span>' : '';
+        html += `<div class="seat-row"><span>🧑 Seat ${i + 1}: <strong>${escHtml(p.name)}</strong></span>${hostBadge}${selfBadge}${away}${noteBadge}</div>`;
       } else {
-        html += `<div style="display:flex;align-items:center;gap:.5rem;background:rgba(0,0,0,.1);padding:.6rem .9rem;border-radius:8px;opacity:.5;">
-          <span style="color:rgba(255,255,255,.4);">Seat ${i + 1}: empty — waiting for a player to join</span>
-        </div>`;
+        html += `<div class="seat-row empty"><span>Seat ${i + 1}: empty</span>${noteBadge}</div>`;
       }
     }
     setHTML('playerSlots', html);
 
-    if (Room.amHost && seatedCount(gs) >= 2) {
-      show('btnStart');
-      el('btnStart').disabled = false;
-    } else {
-      hide('btnStart');
-    }
+    const n = connectedCount(gs);
+    const canStart = n >= logic.minPlayers && n <= logic.maxPlayers;
+    if (Room.amHost && canStart) { show('btnStart'); el('btnStart').disabled = false; } else hide('btnStart');
     setText('waitingMsg', Room.amHost
-      ? 'Need at least 2 players to start — share the invite link!'
+      ? (canStart ? 'Ready when you are!' : `This game needs ${playerRange()} — share the invite link!`)
       : 'Waiting for the host to start the game…');
   }
 
-  /* ───────────── Leaving ───────────── */
+  function startGame() {
+    const gs = Room.state;
+    if (!Room.amHost || !gs || gs.phase !== 'waiting') return;
+    for (const s of seatedPlayers(gs)) if (gs.players[s].disconnected) removeSeat(gs, s);
+    const n = connectedCount(gs);
+    if (n < logic.minPlayers || n > logic.maxPlayers) return;
+    if (logic.start(gs)) pushState(gs);
+  }
+
+  /* ───────────── leaving ───────────── */
   function leave() {
-    if (!Room.amHost && hostConn?.open) hostConn.send({ type: 'leave' });
-    // Host: destroying the peer closes every guest connection, which sends
-    // guests back to the lobby with a "host closed the room" message.
+    if (Room.amHost) {
+      for (const c of peerConns) sendTo(c, { type: 'closed' });
+      // Give the 'closed' message a moment to go out before the peer is destroyed.
+      const p = peer; peer = null;
+      setTimeout(() => p?.destroy(), 150);
+    } else if (hostConn?.open) {
+      hostConn.send({ type: 'leave' });
+    }
+    clearSession();
     goToLobby();
   }
 
   function goToLobby() {
     cfg.onLeave?.();
+    clearTimeout(retryTimer);
+    for (const t of graceTimers.values()) clearTimeout(t);
+    graceTimers.clear(); seatTokens.clear();
     const p = peer;
     peer = null; hostConn = null; peerConns = []; connSeatMap.clear();
+    guestMode = null; myToken = null; hostClosed = false;
     Room.mySeat = -1; Room.myRoomCode = ''; Room.amHost = false; Room.state = null;
-    // Switch view before destroying so the resulting close events are no-ops
-    showView('lobby');
+    showView('lobby'); // before destroy so resulting close events are no-ops
     p?.destroy();
-    // Restore the full lobby (a ?room= link hides New Room / Join Room)
-    show('btnNew');
-    show('btnJoin');
-    hide('joinFields');
+    banner('');
+    show('btnNew'); show('btnJoin'); hide('joinFields');
     setLobbyError('');
     if (window.location.search) history.replaceState({}, '', window.location.pathname);
   }
 
-  /* ───────────── Wiring ───────────── */
+  /* ───────────── wiring ───────────── */
   function flashButton(id, text, restore) {
     const b = el(id);
     if (!b) return;
@@ -388,45 +569,54 @@
     setTimeout(() => { b.textContent = restore; }, 2000);
   }
 
-  function wireLobby() {
+  function wire() {
     el('btnNew')?.addEventListener('click', createRoom);
     el('btnJoin')?.addEventListener('click', () => el('joinFields')?.classList.toggle('hidden'));
     el('btnJoinConfirm')?.addEventListener('click', joinRoom);
     el('roomCode')?.addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
     el('playerName')?.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
-      // On a ?room= link the join form is the only option
       if (el('btnNew')?.classList.contains('hidden')) joinRoom(); else createRoom();
     });
-
-    el('btnStart')?.addEventListener('click', () => {
-      if (Room.amHost && Room.state && Room.state.phase === 'waiting' && seatedCount(Room.state) >= 2) {
-        cfg.onStart(Room.state);
-      }
-    });
+    el('btnStart')?.addEventListener('click', startGame);
     el('btnLeaveWaiting')?.addEventListener('click', leave);
     el('btnCopyCode')?.addEventListener('click', () => {
       navigator.clipboard.writeText(Room.myRoomCode).catch(() => {});
       flashButton('btnCopyCode', '✅ Copied', '📋 Copy code');
     });
     el('btnCopyLink')?.addEventListener('click', () => {
-      const href = el('btnCopyLink')?.getAttribute('data-href') || window.location.href;
-      navigator.clipboard.writeText(href).catch(() => {});
+      navigator.clipboard.writeText(el('btnCopyLink')?.getAttribute('data-href') || window.location.href).catch(() => {});
       flashButton('btnCopyLink', '✅ Copied', '🔗 Copy link');
     });
 
-    // Direct invite link: ?room=CODE pre-fills and shows only the join form
-    const urlCode = new URLSearchParams(window.location.search).get('room');
+    const urlCode = new URLSearchParams(window.location.search).get('room')?.toUpperCase();
+    const saved = loadSession();
+
+    // Refresh: take our seat back (or reopen our room) automatically.
+    if (saved && (!urlCode || urlCode === saved.room)) {
+      Room.myName = saved.name;
+      if (el('playerName')) el('playerName').value = saved.name;
+      if (saved.role === 'host' && saved.state) {
+        Room.amHost = true;
+        Room.mySeat = saved.state.hostSeat ?? 0;
+        banner('Reopening your room…');
+        openHostPeer(saved.room, saved);
+        return;
+      }
+      if (saved.role === 'guest' && saved.token) {
+        setLobbyError(`Rejoining room ${saved.room}…`);
+        startGuest(saved.room, saved.token);
+        return;
+      }
+    }
+
     if (urlCode && urlCode.length === CODE_LENGTH && el('roomCode')) {
-      el('roomCode').value = urlCode.toUpperCase();
-      show('joinFields');
-      hide('btnNew');
-      hide('btnJoin');
+      el('roomCode').value = urlCode;
+      show('joinFields'); hide('btnNew'); hide('btnJoin');
     }
   }
 
   const Room = {
-    // live session values (read by games)
     state: null,
     myName: '',
     mySeat: -1,
@@ -435,17 +625,16 @@
 
     init(config) {
       cfg = config;
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireLobby);
-      else wireLobby();
+      logic = config.logic;
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+      else wire();
     },
-    act,
-    pushState,
-    leave,
-    // helpers
+    act, update, pushState, leave,
+    get logic() { return logic; },
     el, show, hide, setHTML, setText, escHtml, safeParseJSON, handSize,
-    // exposed for tests
     _redactFor: redactFor,
     _genCode: genCode,
+    _setLogicForTests(l) { logic = l; cfg = cfg || {}; },
   };
 
   window.Room = Room;

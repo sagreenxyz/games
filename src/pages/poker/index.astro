@@ -1,178 +1,81 @@
 ---
-import Layout from '../../layouts/Layout.astro';
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+import GameRoom from '../../components/GameRoom.astro';
 ---
-<Layout title="Poker" description="Texas Hold'em Poker — 2 to 4 human players, no computers">
-  <div id="app" style="max-width:1100px;margin:0 auto;padding:1rem 1rem 3rem;">
+<GameRoom slug="poker">
+  <Fragment slot="rules">
+    <ul>
+      <li>Everyone starts with 1,000 chips. Blinds are 10 / 20 and the button moves each hand.</li>
+      <li>Make the best five-card hand from your two cards and the five community cards.</li>
+      <li><strong>Raise by</strong> is the amount on top of the call. Raising by your whole stack is all-in.</li>
+      <li>All-in players can only win what they matched; the rest goes to side pots.</li>
+    </ul>
+  </Fragment>
 
-    <!-- ══ LOBBY ══ -->
-    <section id="lobby" style="max-width:460px;margin:3rem auto;">
-      <h1 style="text-align:center;font-size:2rem;margin-bottom:.25rem;">🃏 Poker</h1>
-      <p style="text-align:center;color:rgba(255,255,255,.65);margin-bottom:2rem;">Texas Hold'em · 2–4 human players · no computers</p>
+  <section id="gameTable" class="hidden">
+    <div class="top-bar">
+      <span id="roundLabel" class="label"></span>
+      <span id="phaseLabel" class="badge badge-gray"></span>
+      <span class="room">Room: <strong id="tableRoomCode"></strong></span>
+      <button id="btnLeaveGame" class="btn btn-sm btn-danger">Drop Out</button>
+    </div>
 
-      <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);">
-        <div style="margin-bottom:1rem;">
-          <label for="playerName">Your display name</label>
-          <input id="playerName" type="text" placeholder="e.g. Alice" maxlength="20" autocomplete="off" />
-        </div>
+    <div class="game-layout">
+      <div class="game-main">
+        <div id="opponentsRow" class="opp-grid"></div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:1rem;">
-          <button id="btnNew" class="btn btn-primary" style="justify-content:center;">
-            ✨ New Room
-          </button>
-          <button id="btnJoin" class="btn btn-outline" style="justify-content:center;">
-            🔗 Join Room
-          </button>
-        </div>
-
-        <div id="joinFields" class="hidden" style="margin-top:1rem;">
-          <label for="roomCode">Room code</label>
-          <div style="display:flex;gap:.5rem;">
-            <input id="roomCode" type="text" placeholder="6-character code" maxlength="6" style="text-transform:uppercase;" autocomplete="off" />
-            <button id="btnJoinConfirm" class="btn btn-success" style="white-space:nowrap;">Join →</button>
+        <div class="panel felt text-center">
+          <div class="muted small mb-1">COMMUNITY CARDS</div>
+          <div id="communityCards" class="cards-row" style="justify-content:center;min-height:96px;">
+            <span class="placeholder">Cards will appear here</span>
           </div>
+          <div class="mt-1">
+            Pot: <strong id="potDisplay" style="color:var(--gold);">0</strong> chips
+            &nbsp;|&nbsp; Current bet: <strong id="currentBetDisplay" style="color:var(--gold);">0</strong>
+          </div>
+          <div id="handRankDisplay" class="muted small" style="min-height:1.2em;"></div>
         </div>
 
-        <p id="lobbyError" style="color:#f4978e;margin-top:.75rem;font-size:.875rem;min-height:1.2em;"></p>
-      </div>
-    </section>
-
-    <!-- ══ WAITING ROOM ══ -->
-    <section id="waitingRoom" class="hidden" style="max-width:560px;margin:2rem auto;">
-      <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow);">
-        <h2 style="margin-bottom:.25rem;">Waiting Room</h2>
-        <p style="color:rgba(255,255,255,.6);font-size:.875rem;margin-bottom:1rem;">
-          Share the invite link (or the room code) with friends so they can join the table. Need at least 2 players to start (up to 4).
-        </p>
-
-        <!-- Room code row -->
-        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.2);border-radius:8px;padding:.75rem 1rem;margin-bottom:.6rem;">
-          <span style="font-size:.875rem;color:rgba(255,255,255,.6);">Room code:</span>
-          <strong id="displayRoomCode" style="font-size:1.4rem;letter-spacing:.15em;color:var(--gold);font-family:monospace;"></strong>
-          <button id="btnCopyCode" class="btn btn-sm btn-outline" style="margin-left:auto;">📋 Copy code</button>
+        <div class="panel">
+          <div class="row wrap mb-1">
+            <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
+            <span id="myChipsLabel" class="chips"></span>
+            <span id="myStatusBadge" style="margin-left:auto;"></span>
+          </div>
+          <div id="myCards" class="hand-row"><span class="placeholder">Your cards will appear here</span></div>
         </div>
 
-        <!-- Invite-link row -->
-        <div style="display:flex;align-items:center;gap:.75rem;background:rgba(0,0,0,.15);border-radius:8px;padding:.6rem 1rem;margin-bottom:.75rem;">
-          <span style="font-size:.8rem;color:rgba(255,255,255,.5);white-space:nowrap;">Invite link:</span>
-          <code id="inviteLink" style="font-size:.78rem;color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></code>
-          <button id="btnCopyLink" class="btn btn-sm btn-outline" style="white-space:nowrap;">🔗 Copy link</button>
+        <div id="actionPanel" class="panel">
+          <div id="turnIndicator" class="muted small mb-1" style="min-height:1.3em;"></div>
+          <div id="actionButtons" class="row wrap">
+            <button id="btnFold"  class="btn btn-danger"  disabled>Fold</button>
+            <button id="btnCheck" class="btn btn-outline" disabled>Check</button>
+            <button id="btnCall"  class="btn btn-success" disabled>Call</button>
+            <div class="row">
+              <button id="btnRaise" class="btn btn-primary" disabled>Raise by</button>
+              <input id="raiseAmount" type="number" min="20" step="10" aria-label="Raise by amount" style="width:95px;" placeholder="raise by" />
+            </div>
+          </div>
+          <div id="gameMessage" class="msg mt-1"></div>
         </div>
-
-        <!-- QR code row -->
-        <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.15);border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem;">
-          <span style="font-size:.8rem;color:rgba(255,255,255,.5);margin-bottom:.5rem;">📱 Scan to join on mobile</span>
-          <div id="qrCodeContainer" style="background:#fff;padding:8px;border-radius:6px;display:inline-block;"></div>
-        </div>
-
-        <div id="playerSlots" style="display:grid;gap:.5rem;margin-bottom:1.25rem;"></div>
-
-        <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
-          <button id="btnStart" class="btn btn-primary hidden">🃏 Start Game</button>
-          <button id="btnLeaveWaiting" class="btn btn-outline btn-sm">← Leave</button>
-        </div>
-        <p id="waitingMsg" style="color:rgba(255,255,255,.6);font-size:.875rem;margin-top:.75rem;"></p>
-      </div>
-    </section>
-
-    <!-- ══ GAME TABLE ══ -->
-    <section id="gameTable" class="hidden">
-
-      <!-- Top info bar -->
-      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:.75rem;margin-bottom:1rem;background:rgba(0,0,0,.25);padding:.6rem 1rem;border-radius:var(--radius);">
-        <span id="roundLabel" style="font-weight:700;font-size:1.05rem;color:var(--gold);"></span>
-        <span id="phaseLabel" style="background:rgba(255,255,255,.1);border-radius:5px;padding:.2rem .6rem;font-size:.85rem;"></span>
-        <span style="margin-left:auto;font-size:.85rem;color:rgba(255,255,255,.6);">Room: <strong id="tableRoomCode" style="color:var(--gold);font-family:monospace;"></strong></span>
-        <button id="btnLeaveGame" class="btn btn-sm btn-danger">Drop Out</button>
       </div>
 
-      <!-- Main area + sidebar -->
-      <div style="display:flex;gap:1rem;align-items:flex-start;">
+      <aside id="actionLogPanel" class="side-log">
+        <h3>📜 Action Log</h3>
+        <div id="actionLogList" class="log-list"><span class="placeholder">Actions will appear here</span></div>
+      </aside>
+    </div>
+  </section>
 
-        <!-- Left: main game area -->
-        <div style="flex:1;min-width:0;">
-
-          <!-- Opponents (top row) -->
-          <div id="opponentsRow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;"></div>
-
-          <!-- Community cards + pot -->
-          <div style="background:var(--green-felt);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;text-align:center;">
-            <div style="font-size:.8rem;color:rgba(255,255,255,.55);margin-bottom:.5rem;">COMMUNITY CARDS</div>
-            <div id="communityCards" style="display:flex;justify-content:center;gap:.5rem;min-height:96px;align-items:center;flex-wrap:wrap;">
-              <span style="color:rgba(255,255,255,.3);font-style:italic;">Cards will appear here</span>
-            </div>
-            <div style="margin-top:.75rem;font-size:1rem;">
-              Pot: <strong id="potDisplay" style="color:var(--gold);">0</strong> chips
-              &nbsp;|&nbsp; Current bet: <strong id="currentBetDisplay" style="color:var(--gold);">0</strong>
-            </div>
-            <div id="handRankDisplay" style="margin-top:.4rem;font-size:.85rem;color:rgba(255,255,255,.55);min-height:1.2em;"></div>
-          </div>
-
-          <!-- My hand (bottom) -->
-          <div style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow);margin-bottom:1rem;">
-            <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
-              <span id="myNameLabel" style="font-weight:700;font-size:1.1rem;"></span>
-              <span id="myChipsLabel" class="chips"></span>
-              <span id="myStatusBadge" style="margin-left:auto;"></span>
-            </div>
-            <div id="myCards" style="display:flex;gap:.5rem;flex-wrap:wrap;min-height:96px;align-items:center;">
-              <span style="color:rgba(255,255,255,.3);font-style:italic;">Your cards will appear here</span>
-            </div>
-          </div>
-
-          <!-- Action panel -->
-          <div id="actionPanel" style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:1.25rem;">
-            <div id="turnIndicator" style="font-size:.9rem;color:rgba(255,255,255,.6);margin-bottom:.75rem;min-height:1.3em;"></div>
-            <div id="actionButtons" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;">
-              <button id="btnFold"  class="btn btn-danger"   disabled>Fold</button>
-              <button id="btnCheck" class="btn btn-outline"  disabled>Check</button>
-              <button id="btnCall"  class="btn btn-success"  disabled>Call</button>
-              <div style="display:flex;gap:.5rem;align-items:center;">
-                <button id="btnRaise" class="btn btn-primary" disabled>Raise by</button>
-                <input id="raiseAmount" type="number" min="20" step="10" aria-label="Raise by amount"
-                       style="width:90px;display:inline-block;"
-                       placeholder="raise by" />
-              </div>
-            </div>
-            <div id="gameMessage" style="margin-top:.75rem;font-size:.95rem;min-height:1.3em;color:var(--gold);font-weight:600;"></div>
-          </div>
-
-        </div><!-- end main game area -->
-
-        <!-- Right: action log sidebar -->
-        <div id="actionLogPanel" style="width:210px;flex-shrink:0;background:rgba(0,0,0,.25);border-radius:var(--radius);padding:1rem;box-shadow:var(--shadow);">
-          <div style="font-size:.875rem;font-weight:700;color:var(--gold);margin-bottom:.75rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:.5rem;">📜 Action Log</div>
-          <div id="actionLogList" style="font-size:.78rem;max-height:520px;overflow-y:auto;display:flex;flex-direction:column;gap:.25rem;">
-            <span style="color:rgba(255,255,255,.3);font-style:italic;">Actions will appear here</span>
-          </div>
-        </div>
-
-      </div><!-- end main area + sidebar -->
-
-    </section>
-
-    <!-- ══ ROUND OVER MODAL ══ -->
-    <div id="roundOverModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:flex;align-items:center;justify-content:center;">
-      <div style="background:var(--green-felt);border-radius:var(--radius);padding:2rem;max-width:420px;width:90%;text-align:center;box-shadow:var(--shadow);">
-        <div style="font-size:2rem;margin-bottom:.5rem;">🏆</div>
-        <div id="roundOverTitle" style="font-size:1.4rem;font-weight:700;margin-bottom:.75rem;color:var(--gold);">Round Over!</div>
-        <div id="roundOverWinner" style="font-size:1rem;margin-bottom:1.5rem;color:rgba(255,255,255,.9);"></div>
-        <div id="roundOverHostControls" class="hidden" style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-bottom:.75rem;">
-          <button id="btnPlayAgain" class="btn btn-primary">🃏 Play Again</button>
-          <button id="btnLeaveAfterRound" class="btn btn-outline">← Leave</button>
-        </div>
-        <div id="roundOverGuestMsg" class="hidden" style="color:rgba(255,255,255,.55);font-size:.875rem;">Waiting for host to start the next round…</div>
+  <div id="roundOverModal" class="modal hidden">
+    <div class="modal-box">
+      <div style="font-size:2rem;">🏆</div>
+      <h2 id="roundOverTitle">Round Over!</h2>
+      <div id="roundOverWinner" class="mb-1"></div>
+      <div id="roundOverHostControls" class="row wrap hidden" style="justify-content:center;">
+        <button id="btnPlayAgain" class="btn btn-primary">🃏 Next Hand</button>
+        <button id="btnLeaveAfterRound" class="btn btn-outline">← Leave</button>
       </div>
+      <div id="roundOverGuestMsg" class="muted small hidden">Next hand starts shortly…</div>
     </div>
   </div>
-</Layout>
-
-<!-- PeerJS — WebRTC-based direct peer-to-peer connections -->
-<script is:inline src={`${base}/peerjs.min.js`}></script>
-<!-- QR code generation for mobile invite (hosted locally for reliability) -->
-<script is:inline src={`${base}/qrcode.min.js`}></script>
-<!-- Shared room / lobby / networking layer -->
-<script is:inline src={`${base}/room.js`}></script>
-<!-- Poker rules engine, then UI -->
-<script is:inline src={`${base}/poker-logic.js`}></script>
-<script is:inline src={`${base}/poker-game.js`}></script>
+</GameRoom>

@@ -1,43 +1,26 @@
 /**
  * Poker — Texas Hold'em UI and host orchestration.
  *
- * Rules live in poker-logic.js (PokerLogic); networking, lobby and waiting
- * room live in room.js (Room). This file renders the table and, on the host,
- * applies actions and schedules round transitions.
+ * Rules live in poker-logic.js (PokerLogic); networking, lobby, waiting room
+ * and applying actions live in room.js (Room). This file renders the table
+ * and, on the host, schedules the next hand and auto-folds absent players.
  */
 (function () {
   'use strict';
 
   const L = PokerLogic;
   const { el, show, hide, setHTML, setText, escHtml, safeParseJSON, handSize } = Room;
-  const RED_SUITS = new Set(['♥', '♦']);
   const NEXT_ROUND_DELAY_MS = 10000;
-  const AUTO_FOLD_DELAY_MS = 1500;
+  const AUTO_FOLD_DELAY_MS = 10000; // give a refreshing player a moment to come back
 
   let roundAdvanceTimeout = null;
   let autoFoldTimeout = null;
 
   /* ───────────── Host orchestration ───────────── */
 
-  function startHand(gs) {
+  function nextHand() {
     clearTimeout(roundAdvanceTimeout);
-    L.startHand(gs);
-    Room.pushState(gs);
-  }
-
-  function onAction(seat, payload) {
-    const gs = Room.state;
-    if (!gs || !payload) return;
-    const res = L.applyAction(gs, seat, payload.action, payload.amount);
-    if (!res.ok) {
-      if (seat === Room.mySeat) setText('gameMessage', res.error);
-      return;
-    }
-    Room.pushState(gs);
-  }
-
-  function onPlayerLeft(gs) {
-    Room.pushState(gs); // onHostState will auto-fold them when it's their turn
+    Room.update(gs => { L.startHand(gs); });
   }
 
   /** Runs on the host after every state change. */
@@ -45,7 +28,7 @@
     if (gs.phase === 'showdown') {
       clearTimeout(roundAdvanceTimeout);
       roundAdvanceTimeout = setTimeout(() => {
-        if (Room.amHost && Room.state?.phase === 'showdown') startHand(Room.state);
+        if (Room.amHost && Room.state?.phase === 'showdown') nextHand();
       }, NEXT_ROUND_DELAY_MS);
       return;
     }
@@ -55,24 +38,15 @@
       autoFoldTimeout = setTimeout(() => {
         const cur = Room.state;
         if (!cur || cur.currentPlayer !== seat) return;
-        if (L.applyAction(cur, seat, 'fold').ok) Room.pushState(cur);
+        if (cur.players[seat]?.disconnected && L.applyAction(cur, seat, 'fold').ok) Room.pushState(cur);
       }, AUTO_FOLD_DELAY_MS);
     }
   }
 
   /* ───────────── Rendering ───────────── */
 
-  function cardHTML(card, faceDown = false) {
-    if (faceDown || !card) return `<div class="playing-card back" title="Hidden card"></div>`;
-    const cls = RED_SUITS.has(card.s) ? 'red' : 'black';
-    return `<div class="playing-card ${cls}">
-      <span class="card-rank-top">${card.r}</span>
-      <span class="card-suit-mid">${card.s}</span>
-      <span class="card-rank-bot">${card.r}</span>
-    </div>`;
-  }
-
-  const placeholder = text => `<span style="color:rgba(255,255,255,.3);font-style:italic;">${text}</span>`;
+  const cardHTML = (card, faceDown = false) => Cards.cardHTML(card, { faceDown });
+  const placeholder = text => `<span class="placeholder">${text}</span>`;
 
   function renderActionLog(gs) {
     const list = el('actionLogList');
@@ -80,11 +54,8 @@
     const entries = gs.actionLog || [];
     if (entries.length === 0) { list.innerHTML = placeholder('Actions will appear here'); return; }
     list.innerHTML = [...entries].reverse().map(item => {
-      if (item.startsWith('---')) {
-        return `<div style="text-align:center;color:rgba(255,255,255,.45);font-size:.72rem;padding:.2rem 0;border-top:1px solid rgba(255,255,255,.1);margin:.2rem 0;">${escHtml(item)}</div>`;
-      }
-      const win = item.startsWith('🏆');
-      return `<div style="color:${win ? 'var(--gold)' : 'rgba(255,255,255,.8)'};padding:.1rem 0;${win ? 'font-weight:600;' : ''}">${escHtml(item)}</div>`;
+      const cls = item.startsWith('---') ? 'sep' : item.startsWith('🏆') ? 'win' : '';
+      return `<div class="${cls}">${escHtml(item)}</div>`;
     }).join('');
   }
 
@@ -100,7 +71,8 @@
       const count = handSize(p);
 
       let badges = '';
-      if (p.disconnected) badges += '<span class="badge badge-gray" style="font-size:.7rem;">Disconnected</span>';
+      if (p.disconnected) badges += `<span class="badge badge-gray" style="font-size:.7rem;">${p.left ? 'Left' : 'Reconnecting…'}</span>`;
+      else if (!p.active && gs.phase !== 'waiting') badges += '<span class="badge badge-gray" style="font-size:.7rem;">Sitting out</span>';
       if (p.folded) badges += '<span class="badge badge-gray" style="font-size:.7rem;margin-left:.25rem;">Folded</span>';
       if (p.allIn) badges += '<span class="badge badge-gold" style="font-size:.7rem;margin-left:.25rem;">All-In</span>';
       if (isTurn) badges += '<span class="badge badge-green" style="font-size:.7rem;margin-left:.25rem;">Turn</span>';
@@ -109,16 +81,14 @@
         ? hand.map(c => cardHTML(c)).join('')
         : Array.from({ length: count }, () => cardHTML(null, true)).join('');
 
-      html += `<div style="background:rgba(0,0,0,.3);border-radius:var(--radius);padding:.9rem;border:2px solid ${isTurn ? 'var(--gold)' : 'transparent'};opacity:${!p.folded && !p.disconnected ? 1 : 0.5};">
-        <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap;">
+      html += `<div class="opp${isTurn ? ' turn' : ''}${p.folded || p.disconnected ? ' out' : ''}">
+        <div class="opp-head">
           <strong>${escHtml(p.name)}</strong>
           ${badges}
-          <span class="chips" style="margin-left:auto;font-size:.85rem;">${p.chips}</span>
+          <span class="chips right">${p.chips}</span>
         </div>
-        <div style="display:flex;gap:.3rem;flex-wrap:wrap;min-height:60px;align-items:center;">
-          ${cards || '<span style="color:rgba(255,255,255,.2);font-size:.8rem;">—</span>'}
-        </div>
-        ${p.bet > 0 ? `<div style="font-size:.75rem;color:rgba(255,255,255,.5);margin-top:.3rem;">Bet: ${p.bet}</div>` : ''}
+        <div class="cards-row">${cards || '<span class="placeholder small">—</span>'}</div>
+        ${p.bet > 0 ? `<div class="muted small">Bet: ${p.bet}</div>` : ''}
       </div>`;
     }
     setHTML('opponentsRow', html);
@@ -136,7 +106,7 @@
 
   function renderActions(gs) {
     const me = gs.players[Room.mySeat];
-    const legal = L.legalActions(gs, Room.mySeat);
+    const legal = L.bettingOptions(gs, Room.mySeat);
     setButtons(legal);
 
     if (gs.phase === 'showdown') {
@@ -162,9 +132,10 @@
       el('btnRaise').textContent = 'Raise by';
       if (me?.folded) setText('turnIndicator', 'You folded. Waiting for the round to end…');
       else if (me?.allIn) setText('turnIndicator', 'You are all-in. Waiting for the hand to resolve…');
+      else if (me && !me.active) setText('turnIndicator', 'You are sitting out this hand — you will be dealt in next hand.');
       else {
         const cp = gs.players[gs.currentPlayer];
-        setText('turnIndicator', cp ? `Waiting for ${cp.name}…` : 'Waiting…');
+        setText('turnIndicator', cp ? `Waiting for ${cp.name}${cp.disconnected ? ' (reconnecting…)' : ''}…` : 'Waiting…');
       }
     }
   }
@@ -217,32 +188,27 @@
   }
 
   Room.init({
-    maxPlayers: L.MAX_PLAYERS,
-    freshRoomState: L.buildFreshRoomState,
-    freshPlayer: L.freshPlayer,
-    canSeeHand: L.canSeeHand,
-    onStart: startHand,
-    onAction,
-    onPlayerLeft,
-    onHostState,
+    logic: L,
     render,
+    onHostState,
     onLeave,
+    onError: msg => setText('gameMessage', msg),
   });
 
   document.addEventListener('DOMContentLoaded', () => {
-    el('btnFold')?.addEventListener('click', () => Room.act({ action: 'fold' }));
-    el('btnCheck')?.addEventListener('click', () => Room.act({ action: 'check' }));
-    el('btnCall')?.addEventListener('click', () => Room.act({ action: 'call' }));
+    el('btnFold')?.addEventListener('click', () => Room.act({ type: 'fold' }));
+    el('btnCheck')?.addEventListener('click', () => Room.act({ type: 'check' }));
+    el('btnCall')?.addEventListener('click', () => Room.act({ type: 'call' }));
     el('btnRaise')?.addEventListener('click', () => {
       const amount = parseInt(el('raiseAmount')?.value || '0', 10);
       if (!Number.isInteger(amount) || amount <= 0) return;
-      Room.act({ action: 'raise', amount });
+      Room.act({ type: 'raise', amount });
     });
     el('btnLeaveGame')?.addEventListener('click', () => {
       if (confirm('Drop out? You will be folded out of the current hand.')) Room.leave();
     });
     el('btnPlayAgain')?.addEventListener('click', () => {
-      if (Room.amHost && Room.state?.phase === 'showdown') { hide('roundOverModal'); startHand(Room.state); }
+      if (Room.amHost && Room.state?.phase === 'showdown') { hide('roundOverModal'); nextHand(); }
     });
     el('btnLeaveAfterRound')?.addEventListener('click', () => { hide('roundOverModal'); Room.leave(); });
   });

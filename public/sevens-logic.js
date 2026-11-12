@@ -12,7 +12,8 @@
  *  - If a player leaves mid-game their cards are dealt out to the players
  *    still holding cards, so the game can always be completed.
  *
- * Exposes `window.SevensLogic` in the browser; loaded via `vm` in unit tests.
+ * Implements the shared rules-engine interface (see room.js). Requires
+ * cards.js. Exposes `window.SevensLogic`.
  */
 (function (root) {
   'use strict';
@@ -27,15 +28,7 @@
   const sameCard = (a, b) => a && b && a.r === b.r && a.s === b.s;
   const log = (gs, line) => (gs.actionLog ??= []).push(line);
 
-  function makeDeck(rng = Math.random) {
-    const d = [];
-    for (const s of SUITS) for (const r of RANKS) d.push({ r, s });
-    for (let i = d.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [d[i], d[j]] = [d[j], d[i]];
-    }
-    return d;
-  }
+  const makeDeck = rng => Cards.makeDeck(rng);
 
   function emptyBoard() {
     const board = {};
@@ -84,10 +77,10 @@
     return { name, handJSON: '[]', isEmpty: false, disconnected: false, passCount: 0, finished: false };
   }
 
-  /** Seats still holding cards and connected, in seat order. */
+  /** Seats still holding cards and still in the game, in seat order. */
   function inPlaySeats(gs) {
     return Object.keys(gs.players).map(Number).sort((a, b) => a - b)
-      .filter(s => { const p = gs.players[s]; return p && !p.isEmpty && !p.disconnected && !p.finished; });
+      .filter(s => { const p = gs.players[s]; return p && !p.isEmpty && !p.left && !p.finished; });
   }
 
   function nextInPlaySeat(gs, fromSeat) {
@@ -100,7 +93,7 @@
   function resetToWaiting(gs) {
     for (const key of Object.keys(gs.players)) {
       const p = gs.players[key];
-      if (!p || p.isEmpty || p.disconnected) { delete gs.players[key]; continue; }
+      if (!p || p.isEmpty || p.left) { delete gs.players[key]; continue; }
       Object.assign(p, { handJSON: '[]', finished: false, passCount: 0 });
     }
     Object.assign(gs, {
@@ -183,13 +176,14 @@
   }
 
   /**
-   * A player left mid-game (already marked `disconnected`). Deal their cards
+   * A player left mid-game for good (marked `left`). Deal their cards
    * out to the remaining players so no suit is blocked, then move the turn on
    * if it was theirs.
    */
   function removePlayer(gs, seat) {
     const p = gs.players[seat];
     if (!p || gs.phase !== 'playing') return;
+    p.left = true;
     const cards = parseHand(p);
     p.handJSON = '[]';
     const seats = inPlaySeats(gs);
@@ -204,9 +198,33 @@
     if (!checkGameOver(gs) && gs.currentPlayer === seat) gs.currentPlayer = nextInPlaySeat(gs, seat);
   }
 
+  function legalActions(gs, seat) {
+    const p = gs.players[seat];
+    if (gs.phase !== 'playing' || gs.currentPlayer !== seat || !p || p.finished) return [];
+    const valid = getValidMoves(gs.board, parseHand(p));
+    return valid.length ? valid.map(card => ({ type: 'play', card })) : [{ type: 'pass' }];
+  }
+
+  function allCards(gs) {
+    const cards = [];
+    for (const s of SUITS) {
+      const col = gs.board[s];
+      if (col) for (let v = col.min; v <= col.max; v++) cards.push({ r: RANKS[v - 1], s });
+    }
+    for (const p of Object.values(gs.players)) if (p) cards.push(...parseHand(p));
+    return cards;
+  }
+
   root.SevensLogic = {
+    id: 'sevens', minPlayers: 2, maxPlayers: MAX_PLAYERS, hiddenFields: [],
+    create: buildFreshRoomState, freshPlayer,
+    start: (gs, rng) => startGame(gs, makeDeck(rng)),
+    apply: (gs, seat, a) => applyAction(gs, seat, a?.type, a?.card),
+    legalActions, removePlayer, allCards,
+    isOver: gs => gs.phase === 'finished',
+    // sevens-specific
     SUITS, RANKS, RANK_VAL, MAX_PLAYERS, OPENING_CARD,
     makeDeck, emptyBoard, getValidMoves, applyCardToBoard,
-    buildFreshRoomState, freshPlayer, startGame, resetToWaiting, applyAction, removePlayer,
+    buildFreshRoomState, startGame, resetToWaiting, applyAction,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

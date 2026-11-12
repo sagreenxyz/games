@@ -23,6 +23,9 @@
   const bc = new BroadcastChannel(CHANNEL_NAME);
   /** Set of peer IDs that have been created in this page */
   const localPeerIds = new Set();
+  /** Live peers in this page — closed on unload, like real WebRTC connections. */
+  const instances = new Set();
+  window.addEventListener('pagehide', () => instances.forEach(p => p.destroy()));
 
   function uid() {
     return Math.random().toString(36).slice(2, 10) + '-mock';
@@ -68,6 +71,8 @@
     constructor(idOrOptions, _options) {
       this.id          = (typeof idOrOptions === 'string') ? idOrOptions : uid();
       this._destroyed  = false;
+      this.disconnected = false;
+      instances.add(this);
       this._listeners  = { open: [], connection: [], error: [] };
       /** @type {Map<string, MockDataConnection>} remoteId → connection */
       this._conns      = new Map();
@@ -159,7 +164,12 @@
       return conn;
     }
 
+    get destroyed() { return this._destroyed; }
+    reconnect() { /* signalling never drops in the mock */ }
+
     destroy() {
+      if (this._destroyed) return;
+      instances.delete(this);
       this._destroyed = true;
       localPeerIds.delete(this.id);
       bc.removeEventListener('message', this._onBCMessage);

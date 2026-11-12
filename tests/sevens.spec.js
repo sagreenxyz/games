@@ -217,4 +217,21 @@ test.describe('Sevens — host + guest integration', () => {
     expect(seen.mine).toBe(26);
   });
 
+  test('Sevens: a guest who refreshes keeps their hand', async ({ context }) => {
+    const hostPage  = await openPage(context, SEVENS_BASE, 'Host');
+    const guestPage = await openPage(context, SEVENS_BASE, 'Guest');
+    await fillName(hostPage, 'Alice');
+    await clickCreate(hostPage);
+    await waitForWaiting(hostPage);
+    const roomCode = await getRoomCode(hostPage);
+    await joinRoomViaForm(guestPage, 'Bob', roomCode);
+    await waitForWaiting(guestPage);
+    await hostPage.click('#btnStart');
+    await waitForGame(guestPage);
+    const before = await guestPage.evaluate(() => Room.state.players[Room.mySeat].handJSON);
+    await guestPage.reload();
+    await waitForGame(guestPage);
+    await expect.poll(() => guestPage.evaluate(() => Room.state?.players[Room.mySeat]?.handJSON)).toBe(before);
+  });
+
 });

@@ -91,40 +91,62 @@ This is a **static site**. Never add:
 
 ### In one sentence
 
-The **host browser** holds the single authoritative game state, applies every action after validating it, and sends each guest a **redacted copy** (no deck, no other players' hands) after every change; guests send actions to the host over PeerJS DataConnections.
+The **host browser** holds the authoritative game state, runs every action through the game's **rules engine**, and sends each guest a **redacted copy** (no hidden piles, no other players' hands) after every change.
 
 ### Files and responsibilities
 
 | File | Exposes | Does |
 |------|---------|------|
-| `public/room.js` | `Room` | PeerJS host/guest setup, join validation (name, seat, phase), waiting room, invite link + QR, `Room.pushState()`, per-guest redaction, leaving. |
-| `public/<game>-logic.js` | `PokerLogic` / `SevensLogic` | Pure rules on a state object. Action handlers return `{ ok: true }` or `{ ok: false, error }` and leave state untouched on error. |
-| `public/<game>-game.js` | — | Calls `Room.init(config)`, renders the game, and on the host applies actions and runs timers. |
+| `public/cards.js` | `Cards` | Deck, shuffle, rank values (ace low/high), sorting, `cardHTML()` |
+| `public/room.js` | `Room` | PeerJS host/guest, lobby, waiting room, applying actions through the engine, redaction, rejoin after refresh, leaving |
+| `public/<game>-logic.js` | e.g. `PokerLogic` | Pure rules implementing the shared engine interface — no DOM, no network, no timers |
+| `public/<game>-game.js` | — | Renders the game and calls `Room.init({ logic, render, ... })` |
+| `src/components/GameRoom.astro` | — | Page shell: lobby + waiting room markup, "How to play" slot, script tags in order |
+| `src/data/games.ts` | `games` | Registry that drives the home page and the header nav |
+
+### The rules-engine interface
+
+Every multiplayer game's logic file exposes the same shape (documented at the top of `room.js`):
+
+```js
+{
+  id, minPlayers, maxPlayers, hiddenFields,   // e.g. ['deck'] — stripped before sending to guests
+  create(code), freshPlayer(name),
+  start(gs, rng) → boolean,                   // false if it can't start (e.g. too few players)
+  legalActions(gs, seat) → action[],          // concrete moves, e.g. { type: 'play', card }
+  apply(gs, seat, action) → { ok, error },    // must not change gs when it fails
+  isOver(gs),                                 // this hand / game has ended
+  removePlayer(gs, seat),                     // a player is gone for good
+  // optional: nextRound(gs, rng), isMatchOver(gs), canSeeHand(gs, viewer, owner), allCards(gs), seatNote(seat)
+}
+```
+
+Because every engine has `legalActions`, the shared harness in `tests/unit/harness.mjs` can fuzz any game: random play must never stall, every listed action must be accepted, idle seats must be refused, and (with `allCards`) no card may be lost or duplicated. Register a new engine in `tests/unit/engines.test.mjs`.
 
 ### State flow
 
 ```
 Guest clicks "Fold"
-  → Room.act({ action: 'fold' })
-  → hostConn.send({ type: 'action', action: 'fold' })
+  → Room.act({ type: 'fold' })
+  → hostConn.send({ type: 'action', action: { type: 'fold' } })
   → HOST room.js: seat = connSeatMap.get(conn)        ← seat comes from the connection, never the message
-  → HOST poker-game.js onAction(seat, payload)
-  → PokerLogic.applyAction(gs, seat, 'fold')          ← rejects out-of-turn / illegal actions
-  → Room.pushState(gs)                                ← redacts per guest, sends, re-renders host
-  → Guests: handleHostMessage → render(state)
+  → logic.apply(gs, seat, action)                     ← rejects out-of-turn / illegal actions
+  → Room.pushState(gs)                                ← redacts per guest, sends, re-renders host, saves session
+  → Guests: render(state)
 ```
 
-### `Room.pushState(gs)` — single update point
+Host-side changes outside an action (e.g. "Next hand") go through `Room.update(gs => { ... })`.
 
-Every host-side state change must end with `Room.pushState(gs)`. It stores the state, sends each guest `redactFor(gs, theirSeat)`, and re-renders the host's own UI (then calls the game's `onHostState` hook, used for timers). Don't call `render` separately.
+### Disconnects and rejoining
+
+- Each guest gets a random **rejoin token** when seated; it is kept in `sessionStorage` (survives a refresh, not closing the tab).
+- A guest who drops is marked `disconnected` and keeps their seat for `rejoinGraceMs` (45 s). Reconnecting with the token restores the seat. Games should wait for, or skip, disconnected players — never treat them as gone.
+- When the grace period ends, or the player clicks Leave, room.js sets `left = true` and calls `logic.removePlayer`.
+- The **host** saves the full state to `sessionStorage` after every change. After a refresh it reopens the same room code, restores the state, and guests (who retry for the grace period) reconnect automatically.
 
 ### Redaction
 
-`redactFor(gs, seat)` deep-copies the state, deletes `deck`, sets `handCount` on every player, and replaces `handJSON` with `"[]"` for every hand the viewer may not see. Games can reveal hands with the `canSeeHand(gs, viewer, owner)` config hook — Poker uses it to show hands still in at a real showdown. Renderers should use `Room.handSize(p)` for card counts.
-
-### `Room.init(config)`
-
-See the comment block at the top of `room.js` for the full list: `maxPlayers`, `freshRoomState`, `freshPlayer`, `onStart`, `onAction`, `onPlayerLeft`, `render`, and optional `onHostState`, `canSeeHand`, `onLeave`.
+`redactFor(gs, seat)` deep-copies the state, deletes the engine's `hiddenFields`, sets `handCount` on every player, and blanks `handJSON` for hands the viewer may not see (`canSeeHand`). Renderers use `Room.handSize(p)` for card counts.
 
 ---
 
@@ -265,17 +287,14 @@ The config (`playwright.config.js`) starts the Astro dev server automatically (r
 
 ## Adding a New Game
 
-1. **Page**: `src/pages/<game-name>/index.astro` — copy `sevens/index.astro`. Keep the lobby and waiting-room markup (and its IDs) unchanged; `room.js` drives it. Load the scripts with `BASE_URL`-based paths as the existing pages do.
+1. **Registry**: add an entry to `src/data/games.ts` (slug, name, emoji, blurb, players, mode, family). The home page and nav pick it up.
+2. **Rules**: `public/<slug>-logic.js` implementing the engine interface above. Reuse `Cards` and any shared family engine.
+3. **Page**: `src/pages/<slug>/index.astro` using `<GameRoom slug="<slug>">`, with a `slot="rules"` fragment and your `#gameTable` markup. Pass `extra={[...]}` for shared engine scripts.
+4. **UI**: `public/<slug>-game.js` — `Room.init({ logic, render, onError, onLeave })`; send moves with `Room.act({ type, ... })`.
+5. **Tests**: add the engine to `tests/unit/engines.test.mjs` (free fuzz coverage), write rules tests in `tests/unit/<slug>-logic.test.mjs`, and an E2E spec `tests/<slug>.spec.js` covering a game played through and a player leaving.
+6. **Docs**: rules in the README.
 
-2. **Rules**: `public/<game-name>-logic.js` — pure functions on a state object, exposed as one global. Validate every action (turn, phase, legality) and return `{ ok, error }`.
-
-3. **UI**: `public/<game-name>-game.js` — call `Room.init({...})`, render from the state, and on the host call your logic then `Room.pushState(gs)`. Use `Room.handSize(p)` for opponents' card counts. Provide `canSeeHand` if hands are ever revealed.
-
-4. **Home card + nav**: `src/pages/index.astro` and `src/layouts/Layout.astro`.
-
-5. **Tests**: unit tests in `tests/unit/<game-name>-logic.test.mjs` (include a fuzz test that plays random games to completion) and an E2E spec in `tests/<game-name>.spec.js` using the mock-injection pattern.
-
-6. **Assets**: Any third-party JS libraries go in `public/` as **local copies** (no CDN references).
+Solo games skip `room.js`: the page uses `Layout` directly and the UI drives the engine itself (seat 0), saving to `localStorage`.
 
 ---
 
@@ -286,6 +305,7 @@ The config (`playwright.config.js`) starts the Astro dev server automatically (r
 | **PeerJS instead of Gun.js** | Gun.js relay servers were unreliable and Gun's reactive model added complexity. PeerJS gives direct WebRTC DataChannels: lower latency, simpler API, no relay dependency for data (only for ICE signalling). |
 | **Host = single source of truth** | Avoids conflict resolution. All clients see the same state because the host broadcasts the full object after every change. |
 | **Full (redacted) state on every broadcast** | Simpler than delta/patch updates. State objects are small (< 5 KB per broadcast). Each guest gets its own copy with hidden information removed, so devtools can't reveal other hands or the deck. |
+| **Common engine interface + fuzz harness** | Every game gets stall / legality / card-conservation coverage for free, and room.js can host any game without game-specific glue. |
 | **Shared `room.js`, separate `*-logic.js`** | The lobby/networking code was duplicated in every game, so fixes had to be made twice. Splitting pure rules from UI makes the rules unit-testable in Node without a browser. |
 | **Node's built-in test runner for unit tests** | No extra dependencies; the logic files are loaded into a `vm` sandbox exactly as the browser would run them. |
 | **Vanilla JS in `public/`** | Zero build complexity for game logic. No virtual DOM overhead. The files are small enough that a framework would add more weight than value. |
