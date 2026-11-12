@@ -13,6 +13,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [How to Play — Sevens](#-how-to-play--sevens)
 - [How to Play — Gin Rummy](#-how-to-play--gin-rummy)
 - [How to Play — Rummy and Rummy 500](#-how-to-play--rummy-and-rummy-500)
+- [How to Play — Klondike Solitaire](#-how-to-play--klondike-solitaire)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -167,6 +168,17 @@ Both games are for **2–6 players** and share the same turn: **draw** (stock or
 | Winning | First to 100 | First to 500 (highest score if several reach it in the same hand) |
 
 If a player leaves, their cards go back under the stock and play continues; the last player left wins.
+
+---
+
+## 🂮 How to Play — Klondike Solitaire
+
+A one-player game — no room or friends needed. Move all 52 cards to the four **foundations** (one per suit, Ace up to King).
+
+- **Tableau**: build down in alternating colours (red 6 on black 7). Move any face-up run together; only a King can fill an empty column. Uncovered cards turn face up.
+- **Stock**: click to draw 1 or 3 cards (choose before dealing). When it's empty, click again to turn the waste back over — unlimited passes.
+- **Controls**: click a card, then click where it should go (legal targets are outlined). Double-click sends a card to its foundation. **Undo** (or Ctrl+Z) as often as you like, **Hint** suggests a move, and **Finish** completes the game once every card is face up.
+- Your game is saved in this browser, so you can close the tab and come back.
 
 ---
 
@@ -328,6 +340,7 @@ games/
 │   ├── rummy-core.js                ← shared meld engine (sets, runs, deadwood, layoffs)
 │   ├── gin-logic.js / gin-game.js   ← Gin Rummy
 │   ├── rummy-logic.js / rummy-game.js ← Basic Rummy + Rummy 500 (one engine, two variants)
+│   ├── klondike-logic.js / klondike-game.js ← Klondike (solo; no room.js)
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │
