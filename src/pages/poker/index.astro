@@ -1,5 +1,6 @@
 ---
 import Layout from '../../layouts/Layout.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <Layout title="Poker" description="Texas Hold'em Poker — 2 to 4 human players, no computers">
   <div id="app" style="max-width:1100px;margin:0 auto;padding:1rem 1rem 3rem;">
@@ -127,10 +128,10 @@ import Layout from '../../layouts/Layout.astro';
               <button id="btnCheck" class="btn btn-outline"  disabled>Check</button>
               <button id="btnCall"  class="btn btn-success"  disabled>Call</button>
               <div style="display:flex;gap:.5rem;align-items:center;">
-                <button id="btnRaise" class="btn btn-primary" disabled>Raise</button>
-                <input id="raiseAmount" type="number" min="20" step="10"
+                <button id="btnRaise" class="btn btn-primary" disabled>Raise by</button>
+                <input id="raiseAmount" type="number" min="20" step="10" aria-label="Raise by amount"
                        style="width:90px;display:inline-block;"
-                       placeholder="amount" />
+                       placeholder="raise by" />
               </div>
             </div>
             <div id="gameMessage" style="margin-top:.75rem;font-size:.95rem;min-height:1.3em;color:var(--gold);font-weight:600;"></div>
@@ -167,8 +168,11 @@ import Layout from '../../layouts/Layout.astro';
 </Layout>
 
 <!-- PeerJS — WebRTC-based direct peer-to-peer connections -->
-<script is:inline src="/games/peerjs.min.js"></script>
+<script is:inline src={`${base}/peerjs.min.js`}></script>
 <!-- QR code generation for mobile invite (hosted locally for reliability) -->
-<script is:inline src="/games/qrcode.min.js"></script>
-<!-- Poker game logic -->
-<script is:inline src="/games/poker-game.js"></script>
+<script is:inline src={`${base}/qrcode.min.js`}></script>
+<!-- Shared room / lobby / networking layer -->
+<script is:inline src={`${base}/room.js`}></script>
+<!-- Poker rules engine, then UI -->
+<script is:inline src={`${base}/poker-logic.js`}></script>
+<script is:inline src={`${base}/poker-game.js`}></script>

@@ -8,7 +8,9 @@ This document is the primary reference for **developers and AI coding sessions**
 
 - [Development Environment](#development-environment)
 - [Project Conventions](#project-conventions)
-- [Poker Game — Deep Dive](#poker-game--deep-dive)
+- [Architecture](#architecture)
+- [Poker Rules Engine](#poker-rules-engine)
+- [Sevens Rules Engine](#sevens-rules-engine)
 - [Testing Guide](#testing-guide)
 - [Known Issues](#known-issues)
 - [Adding a New Game](#adding-a-new-game)
@@ -29,14 +31,17 @@ This document is the primary reference for **developers and AI coding sessions**
 ```bash
 # First-time setup
 nvm use            # switch to Node 22 via .nvmrc
-npm install        # installs Astro + dev deps (Playwright, peer, peerjs)
+npm install        # installs Astro + dev deps (Playwright, peerjs)
+npx playwright install chromium   # browser for E2E tests
 ```
 
 ### Daily workflow
 
 ```bash
 npm run dev        # start Astro dev server at http://localhost:4321/games/
-npm test           # run Playwright E2E tests (headless Chromium)
+npm test           # unit tests, then Playwright E2E tests
+npm run test:unit  # rules-engine unit tests only (fast, no browser)
+npm run test:e2e   # Playwright E2E tests (headless Chromium)
 npm run test:ui    # open the Playwright interactive UI
 npm run build      # build static site into dist/
 npm run preview    # serve the built site locally
@@ -48,6 +53,7 @@ npm run preview    # serve the built site locally
 |-----|---------|
 | `http://localhost:4321/games/` | Home / game selection |
 | `http://localhost:4321/games/poker/` | Poker lobby |
+| `http://localhost:4321/games/sevens/` | Sevens lobby |
 | `http://localhost:4321/games/poker/?room=ABCDEF` | Pre-filled join link |
 
 ---
@@ -60,11 +66,13 @@ The project uses Astro's strict TypeScript preset (`tsconfig.json`). **Astro com
 
 ### Vanilla JS in `public/`
 
-`public/poker-game.js` is served as-is to the browser. No bundler, no transpiler:
+Files in `public/` are served as-is to the browser. No bundler, no transpiler:
 - ES2020+ syntax is fine (browsers are modern).
 - Use `/** JSDoc */` comments on public/important functions.
-- No `import`/`export` — everything is top-level in a single file.
-- All DOM IDs come from `src/pages/poker/index.astro`; keep them in sync.
+- No `import`/`export` — each file is a classic script wrapped in an IIFE that exposes at most one global (`Room`, `PokerLogic`, `SevensLogic`).
+- `*-logic.js` files must stay free of DOM, network and timer code so they can be unit-tested in Node.
+- All DOM IDs come from `src/pages/<game>/index.astro`; keep them in sync. The lobby / waiting-room IDs are shared by every game because `room.js` uses them.
+- Script `src` paths in pages are built from `import.meta.env.BASE_URL`, so `BASE_PATH` works — don't hard-code `/games/`.
 
 ### CSS
 
@@ -79,122 +87,88 @@ This is a **static site**. Never add:
 
 ---
 
-## Poker Game — Deep Dive
+## Architecture
 
-### Architecture in One Sentence
+### In one sentence
 
-The **host browser** holds the single authoritative game state and broadcasts a full copy to every peer after every change; peers relay actions back to the host via PeerJS DataConnections.
+The **host browser** holds the single authoritative game state, applies every action after validating it, and sends each guest a **redacted copy** (no deck, no other players' hands) after every change; guests send actions to the host over PeerJS DataConnections.
 
-### State Flow
+### Files and responsibilities
+
+| File | Exposes | Does |
+|------|---------|------|
+| `public/room.js` | `Room` | PeerJS host/guest setup, join validation (name, seat, phase), waiting room, invite link + QR, `Room.pushState()`, per-guest redaction, leaving. |
+| `public/<game>-logic.js` | `PokerLogic` / `SevensLogic` | Pure rules on a state object. Action handlers return `{ ok: true }` or `{ ok: false, error }` and leave state untouched on error. |
+| `public/<game>-game.js` | — | Calls `Room.init(config)`, renders the game, and on the host applies actions and runs timers. |
+
+### State flow
 
 ```
 Guest clicks "Fold"
-  → playerAction('fold')
-  → hostConn.send({ type:'action', seat, action:'fold' })
-  → HOST: handleNewPeerConnection → conn.on('data')
-  → HOST: applyAction(localState, seat, 'fold')
-  → HOST: pushState(gs)          ← broadcasts to peers + re-renders host UI
-  → Peers: handleHostMessage → onStateChange(gs)
+  → Room.act({ action: 'fold' })
+  → hostConn.send({ type: 'action', action: 'fold' })
+  → HOST room.js: seat = connSeatMap.get(conn)        ← seat comes from the connection, never the message
+  → HOST poker-game.js onAction(seat, payload)
+  → PokerLogic.applyAction(gs, seat, 'fold')          ← rejects out-of-turn / illegal actions
+  → Room.pushState(gs)                                ← redacts per guest, sends, re-renders host
+  → Guests: handleHostMessage → render(state)
 ```
 
-### `pushState(gs)` — single update point
+### `Room.pushState(gs)` — single update point
 
-Every change to game state must go through `pushState`. It:
-1. Sets `localState = gs`.
-2. Calls `broadcastToPeers({ type: 'state', state: gs })` to all connected peers.
-3. Calls `onStateChange(gs)` to re-render the **host's own** UI.
+Every host-side state change must end with `Room.pushState(gs)`. It stores the state, sends each guest `redactFor(gs, theirSeat)`, and re-renders the host's own UI (then calls the game's `onHostState` hook, used for timers). Don't call `render` separately.
 
-**Do not** call `onStateChange` separately after `pushState` — it will render twice.
+### Redaction
 
-### `applyAction(gs, seat, action, amount)` — the action engine
+`redactFor(gs, seat)` deep-copies the state, deletes `deck`, sets `handCount` on every player, and replaces `handJSON` with `"[]"` for every hand the viewer may not see. Games can reveal hands with the `canSeeHand(gs, viewer, owner)` config hook — Poker uses it to show hands still in at a real showdown. Renderers should use `Room.handSize(p)` for card counts.
 
-All player actions are processed here (called for both host and peer moves). After the switch statement:
-1. Checks if only one active player remains → immediate pot award + showdown.
-2. Checks `isBettingRoundOver(gs)` → either advances to next phase or moves to the next player.
+### `Room.init(config)`
 
-### `isBettingRoundOver(gs)` — current implementation
+See the comment block at the top of `room.js` for the full list: `maxPlayers`, `freshRoomState`, `freshPlayer`, `onStart`, `onAction`, `onPlayerLeft`, `render`, and optional `onHostState`, `canSeeHand`, `onLeave`.
 
-Returns `true` when all active (non-folded, non-all-in) players have `bet === currentBet`:
+---
 
-```js
-function isBettingRoundOver(gs) {
-  const active = Object.keys(gs.players)
-    .map(Number)
-    .filter(i => gs.players[i] && gs.players[i].active
-              && !gs.players[i].folded && !gs.players[i].allIn);
-  if (active.length <= 1) return true;
-  return active.every(i => gs.players[i].bet === gs.currentBet);
-}
-```
+## Poker Rules Engine
 
-> ⚠️ **Known limitation** — see [Known Issues](#known-issues): this check can trigger too early when all bets happen to equal `currentBet` even though not all players have had a turn (e.g., first check on a new street, or BB option pre-flop).
+All in `public/poker-logic.js`.
 
-### `nextPlayer(gs)` — current implementation
+### Hand lifecycle
 
-Uses `activeSeatOrder` (seats starting from dealer+1, excluding folded players) and finds the next seat after `currentPlayer`:
+- `startHand(gs, deck?)` — removes disconnected players, rebuys busted ones (back to 1,000), moves the button to the next occupied seat, deals, posts blinds, and calls `settle`. Returns `false` and switches to `'waiting'` if fewer than two players are left.
+- `applyAction(gs, seat, action, amount)` — validates via `legalActions`, applies the bet, updates `streetActed`/`minRaise`, then calls `settle`.
+- `settle(gs)` (internal) — loops: if one live player → award uncontested; else if the street isn't over → next actor; else if river → showdown; else deal the next street. Because it loops, an all-in with nobody left to bet runs the board out automatically.
 
-```js
-function nextPlayer(gs) {
-  const active = activeSeatOrder(gs).filter(s => !gs.players[s].folded && !gs.players[s].allIn);
-  if (active.length === 0) return -1;
-  const idx = active.indexOf(gs.currentPlayer);
-  return active[(idx + 1) % active.length];
-}
-```
+### Betting rules
 
-> ⚠️ **Known limitation**: when a player folds, they are removed from `active`, so `idx === -1`. In that case `active[0]` is returned (first player after the dealer), which may skip the player who should act next. See [Known Issues](#known-issues).
+- `isBettingRoundOver`: over when nobody can bet; or the only player who can bet has matched `currentBet`; or every player who can bet is in `streetActed` and has matched.
+- A **full raise** (≥ `minRaise`) resets `streetActed` to `[raiser]` and sets `minRaise` to the raise size. A **short all-in raise** raises `currentBet` but doesn't re-open betting.
+- `raise` amounts are "raise **by**" (on top of the call). Anything ≥ the player's remaining stack becomes an all-in.
+- Turn order is a forward scan from the current seat (`nextActor`), so folds never skip a player.
 
-### Blind posting (`postBlinds`)
+| Game size | Small Blind | Big Blind | First to act pre-flop | First to act post-flop |
+|-----------|-------------|-----------|----------------------|------------------------|
+| 2 (heads-up) | Button | Other player | Button/SB | Other player |
+| 3–4 | Left of button | Next seat | Left of BB (UTG) | First live seat left of button |
 
-| Game size | Small Blind | Big Blind | First to act pre-flop |
-|-----------|-------------|-----------|----------------------|
-| 2 (heads-up) | `activeSeatOrder[1]` (dealer) | `activeSeatOrder[0]` | Dealer/SB |
-| 3–4 players | `activeSeatOrder[0]` (left of dealer) | `activeSeatOrder[1]` | `activeSeatOrder[2]` (UTG) |
+### Showdown and side pots
 
-`activeSeatOrder` starts from `dealer + 1` and returns active non-folded seats in clockwise order.
+Each player's `contributed` tracks chips put in this hand. `buildPots` makes one pot per distinct contribution level among live players; folded players' chips count toward pots but they're never eligible. Each pot goes to the best eligible hand; an odd chip goes to the first tied winner clockwise from the button. An uncalled bet ends up in a pot only its bettor is eligible for, so it's returned.
 
-### Dealer rotation (`startNewRound`)
+### Hand evaluation
 
-Scans forward from `dealer + 1` skipping empty seats, ensuring the button always lands on an occupied seat:
+`score5` groups ranks by count (then rank) so pairs/trips are compared before kickers; the wheel (A-2-3-4-5) counts as 5-high. `evalHand` picks the best 5 of up to 7 cards.
 
-```js
-let next = (gs.dealer + 1) % MAX_PLAYERS;
-let safety = MAX_PLAYERS;
-while (!gs.players[next] && safety-- > 0) next = (next + 1) % MAX_PLAYERS;
-gs.dealer = next;
-```
+---
 
-### Showdown & split pots
+## Sevens Rules Engine
 
-```js
-const share = Math.floor(gs.pot / winners.length);
-for (const w of winners) gs.players[w].chips += share;
-```
+All in `public/sevens-logic.js`.
 
-> ⚠️ **Known limitation**: if the pot is not evenly divisible, the remainder chip(s) are discarded. This is a minor accounting issue.
-
-### Bet reset between streets
-
-`nextPhase` resets `p.bet = 0` for all players and `gs.currentBet = 0` before dealing community cards. This means a fresh `isBettingRoundOver` check at the start of a new street finds all bets equal (0 = 0) and can advance prematurely. See [Known Issues](#known-issues).
-
-### `renderGame` — one-shot full render
-
-Called after every state change. Renders: round/phase labels, community cards, each player's opponent panel, my hand panel, and action buttons. The action buttons are **disabled in-place** (never removed from the DOM) so subsequent renders can re-enable them without null-reference errors.
-
-### Key global variables
-
-| Variable | Type | Purpose |
-|----------|------|---------|
-| `peer` | `Peer \| null` | Our PeerJS Peer instance |
-| `hostConn` | `DataConnection \| null` | Guest's connection to the host |
-| `peerConns` | `DataConnection[]` | Host's connections to all guests |
-| `connSeatMap` | `Map<DataConnection, number>` | Maps each connection to its seat number |
-| `localState` | `object \| null` | Full game state (host is authoritative; guests hold a copy) |
-| `mySeat` | `number` | This browser's seat index (0–3), -1 if unset |
-| `myName` | `string` | This browser's display name |
-| `myRoomCode` | `string` | The 6-character room code |
-| `amHost` | `boolean` | True if this browser is the host |
-| `view` | `string` | Current view: `'lobby'` \| `'waiting'` \| `'game'` |
+- `startGame(gs, deck?)` — clears out departed players, deals all 52 cards round-robin, and gives the first turn to the 7♦ holder.
+- `getValidMoves(board, hand)` — 7♦ must be played first; afterwards any 7 opens its suit and other cards must extend a suit by one at either end.
+- `applyAction(gs, seat, 'play' | 'pass', card)` — rejects out-of-turn moves, cards not held, illegal cards, and passing while a move exists.
+- `removePlayer(gs, seat)` — a player left mid-game: their cards are dealt out to the players still holding cards (so no suit is ever blocked), and the turn moves on if it was theirs. Since every remaining card is in an active player's hand, someone always has a legal move.
+- `resetToWaiting(gs)` — used by Play Again; also drops players who left.
 
 ---
 
@@ -217,6 +191,10 @@ await page.route('**/peerjs.min.js', async route => {
 The mock implements the same `Peer` + `DataConnection` API as PeerJS 1.x, but uses `BroadcastChannel` as the transport. Key guarantees:
 - The host's `connection` event fires **before** the guest's `open` event, matching real PeerJS ordering.
 - `peer-unavailable` errors fire after a 3-second timeout when no peer with that ID responds.
+
+### Unit tests (`tests/unit/`)
+
+`tests/unit/load.mjs` runs files from `public/` inside a `vm` sandbox (with a stub `document`) and returns their globals, so the rules engines are tested exactly as the browser loads them. Use the seeded `rng()` helper with `makeDeck(rng(n))` for reproducible deals. Tests are run by `node --test` (no extra dependencies).
 
 ### Same context — critical constraint
 
@@ -266,93 +244,38 @@ page.locator('#btnStart')        // host-only start button
 ### Running tests
 
 ```bash
-npm test                                      # all tests, headless
-npx playwright test tests/poker.spec.js      # single file
+npm test                                      # unit + E2E
+npm run test:unit                             # unit only
+npx playwright test tests/poker.spec.js      # single E2E file
 npm run test:ui                               # interactive Playwright UI
 ```
 
-The config (`playwright.config.js`) starts the Astro dev server automatically (reusing one if already running) and a local PeerJS server on port 9001 via `globalSetup`.
+The config (`playwright.config.js`) starts the Astro dev server automatically (reusing one if already running, except in CI). CI runs both suites on every pull request and before every deploy.
 
 ---
 
 ## Known Issues
 
-These bugs exist in the current codebase and have not yet been fixed. They are documented here so future sessions can address them systematically.
-
-### 1. BB option missing pre-flop (3+ players)
-
-**Symptom**: With 3 or 4 players, if all players call (don't raise) before it reaches the Big Blind, the betting round ends immediately and the flop is dealt — the BB never gets their option to raise.
-
-**Root cause**: `isBettingRoundOver` returns `true` as soon as `all bets === currentBet`. After UTG and SB call, all three players have `bet === 20 === currentBet`, so the check returns `true` before BB acts.
-
-**Affected code**: `isBettingRoundOver` in `poker-game.js`.
-
-**Fix direction**: Track which seats have voluntarily acted in the current street. Add a `gs.streetActed` array. Initialize it to `[]` in `postBlinds` and `nextPhase`. Append to it in `applyAction`. Reset to `[raisingSeat]` when `currentBet` increases. Modify `isBettingRoundOver` to also require `active.every(i => gs.streetActed.includes(i))`.
-
-### 2. All-check on new street advances phase immediately
-
-**Symptom**: On the flop, turn, or river, the first player to check causes the game to immediately advance to the next street — no other players get to act.
-
-**Root cause**: At the start of each street, `p.bet = 0` for all players and `currentBet = 0`. The very first `check` action triggers `isBettingRoundOver`, which finds `all(0 === 0) = true` and goes to the next phase.
-
-**Affected code**: `isBettingRoundOver` + the bet reset in `nextPhase`.
-
-**Fix direction**: Same fix as issue #1 — `gs.streetActed` tracking ensures not all players have acted until they actually do.
-
-### 3. Wrong next player after fold in multi-player games
-
-**Symptom**: When a player folds, the action may skip to the wrong player (the first seat after the dealer instead of the next player in rotation).
-
-**Root cause**: `nextPlayer` uses `activeSeatOrder(gs).indexOf(gs.currentPlayer)`. If the current player just folded, they are no longer in `activeSeatOrder` and `indexOf` returns `-1`. The formula `active[(-1 + 1) % len] = active[0]` then returns the first seat in the order, not the next one.
-
-**Affected code**: `nextPlayer` in `poker-game.js`.
-
-**Fix direction**: Replace the `activeSeatOrder + indexOf` approach with a simple forward scan from `currentPlayer`:
-```js
-for (let offset = 1; offset <= MAX_PLAYERS; offset++) {
-  const s = (gs.currentPlayer + offset) % MAX_PLAYERS;
-  const p = gs.players[s];
-  if (p && p.active && !p.folded && !p.allIn) return s;
-}
-return -1;
-```
-
-### 4. Split pot remainder chips lost
-
-**Symptom**: In a split pot where `pot % winners.length !== 0`, the leftover chips disappear. Example: pot = 31, two winners each get 15, and 1 chip vanishes.
-
-**Affected code**: `resolveShowdown` in `poker-game.js`.
-
-**Fix direction**: Award remainder to the lowest-numbered winner seat:
-```js
-const share = Math.floor(gs.pot / winners.length);
-const remainder = gs.pot - share * winners.length;
-for (const w of winners) gs.players[w].chips += share;
-winners.sort((a, b) => a - b);
-gs.players[winners[0]].chips += remainder;
-```
-
-### 5. Home page still says "AI fills empty seats"
-
-**Symptom**: `src/pages/index.astro` has the text "AI fills empty seats automatically." AI opponents were removed; only human players are supported.
-
-**Affected code**: The Poker card in `src/pages/index.astro` and the badge `<span class="badge badge-green">AI Opponents</span>`.
-
-**Fix direction**: Remove the AI reference and badge, update description to "2–4 human players · no AI".
+- **No host migration.** If the host leaves, the room closes and guests return to the lobby.
+- **The host can see everything.** Redaction protects guests from each other, but the host's browser deals the cards.
+- **Short all-in raises** don't re-open betting for players who already acted, but those players are asked to act again (and could re-raise) because their bet no longer matches. Strict rules would limit them to call or fold.
+- **No TURN server** is configured by default, so some restrictive networks can't connect.
 
 ---
 
 ## Adding a New Game
 
-1. **Page**: `src/pages/<game-name>/index.astro` — use the poker page as a template. Define all HTML structure here; no JavaScript in `.astro` files (use `is:inline` scripts to load from `public/`).
+1. **Page**: `src/pages/<game-name>/index.astro` — copy `sevens/index.astro`. Keep the lobby and waiting-room markup (and its IDs) unchanged; `room.js` drives it. Load the scripts with `BASE_URL`-based paths as the existing pages do.
 
-2. **Logic**: `public/<game-name>.js` — plain vanilla JS. Follow the poker pattern: globals for state, one `pushState`-style function as the single update point, one `render`-style function for all DOM output.
+2. **Rules**: `public/<game-name>-logic.js` — pure functions on a state object, exposed as one global. Validate every action (turn, phase, legality) and return `{ ok, error }`.
 
-3. **Home card**: `src/pages/index.astro` — copy the Poker card block and update the link, emoji, title, description, and badges.
+3. **UI**: `public/<game-name>-game.js` — call `Room.init({...})`, render from the state, and on the host call your logic then `Room.pushState(gs)`. Use `Room.handSize(p)` for opponents' card counts. Provide `canSeeHand` if hands are ever revealed.
 
-4. **Tests**: `tests/<game-name>.spec.js` — follow `tests/poker.spec.js`. Use the same mock-injection pattern if the game needs P2P. Keep pages in the same context.
+4. **Home card + nav**: `src/pages/index.astro` and `src/layouts/Layout.astro`.
 
-5. **Assets**: Any third-party JS libraries go in `public/` as **local copies** (no CDN references). This prevents external failures from breaking the game.
+5. **Tests**: unit tests in `tests/unit/<game-name>-logic.test.mjs` (include a fuzz test that plays random games to completion) and an E2E spec in `tests/<game-name>.spec.js` using the mock-injection pattern.
+
+6. **Assets**: Any third-party JS libraries go in `public/` as **local copies** (no CDN references).
 
 ---
 
@@ -362,10 +285,12 @@ gs.players[winners[0]].chips += remainder;
 |----------|-----------|
 | **PeerJS instead of Gun.js** | Gun.js relay servers were unreliable and Gun's reactive model added complexity. PeerJS gives direct WebRTC DataChannels: lower latency, simpler API, no relay dependency for data (only for ICE signalling). |
 | **Host = single source of truth** | Avoids conflict resolution. All clients see the same state because the host broadcasts the full object after every change. |
-| **Full state on every broadcast** | Simpler than delta/patch updates. State objects are small (< 5 KB per broadcast). No merge logic needed. |
-| **Vanilla JS in `public/`** | Zero build complexity for game logic. No virtual DOM overhead. The file is small enough (~1,050 lines) that a framework would add more weight than value. |
-| **Local copies of PeerJS and QRCode** | CDN outages would break the game mid-session. Locally bundled libraries avoid this. |
+| **Full (redacted) state on every broadcast** | Simpler than delta/patch updates. State objects are small (< 5 KB per broadcast). Each guest gets its own copy with hidden information removed, so devtools can't reveal other hands or the deck. |
+| **Shared `room.js`, separate `*-logic.js`** | The lobby/networking code was duplicated in every game, so fixes had to be made twice. Splitting pure rules from UI makes the rules unit-testable in Node without a browser. |
+| **Node's built-in test runner for unit tests** | No extra dependencies; the logic files are loaded into a `vm` sandbox exactly as the browser would run them. |
+| **Vanilla JS in `public/`** | Zero build complexity for game logic. No virtual DOM overhead. The files are small enough that a framework would add more weight than value. |
+| **Local copies of PeerJS and QRCode** | CDN outages would break the game mid-session. Locally bundled libraries avoid this. `public/peerjs.min.js` is copied from the `peerjs` dev dependency with `npm run vendor:peerjs`. |
 | **BroadcastChannel mock for tests** | WebRTC in headless Chromium requires STUN/TURN servers even for localhost, which aren't available in CI. BroadcastChannel gives equivalent same-process message passing without any network. |
 | **`pushState` calls `onStateChange`** | Ensures the host's own UI is always in sync after any state change. Previously `pushState` only broadcast to peers; hosts had to call `onStateChange` separately at every call site, and missing a call led to stale UI. |
 | **Buttons disabled not removed** | Clearing `#actionButtons` innerHTML removes the button elements from the DOM. Subsequent renders then throw null-reference errors when trying to set `.disabled`. Buttons are now always disabled in-place. |
-| **No AI opponents** | Removed to keep the codebase focused on the multiplayer infrastructure. Placeholder text on the home page ("AI fills empty seats") is a known issue to be cleaned up. |
+| **No AI opponents** | Removed to keep the codebase focused on the multiplayer infrastructure. |
