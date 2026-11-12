@@ -247,3 +247,29 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 .discard-spread .pile-btn:disabled .playing-card { cursor: default; }
 .meld-target { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; }
 .meld-target:hover { background: rgba(244,162,97,.25); }
+
+/* ══════════ Klondike ══════════ */
+.klondike { --cw: clamp(40px, calc((min(100vw, 1150px) - 2rem - 6 * 8px) / 7), 84px); }
+.klondike .playing-card { width: var(--cw); height: calc(var(--cw) * 1.45); font-size: calc(var(--cw) * .2); padding: calc(var(--cw) * .06); }
+.klondike .card-suit-mid { font-size: calc(var(--cw) * .38); }
+.klondike .card-rank-top, .klondike .card-rank-bot { font-size: calc(var(--cw) * .22); }
+.k-board { background: var(--green-felt); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+.k-top { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 14px; }
+.k-gap { flex: 1; }
+.k-foundations { display: flex; gap: 8px; }
+.k-slot { width: var(--cw); height: calc(var(--cw) * 1.45); border-radius: 8px; border: 1px dashed rgba(255,255,255,.25); position: relative; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.3); font-size: calc(var(--cw) * .4); cursor: pointer; flex-shrink: 0; }
+.k-slot > .playing-card { position: absolute; inset: 0; }
+.k-waste { border-color: transparent; cursor: default; }
+.k-waste.fan3 { width: calc(var(--cw) * 1.6); }
+.k-waste .playing-card { position: absolute; top: 0; }
+.k-tableau { display: grid; grid-template-columns: repeat(7, var(--cw)); gap: 8px; justify-content: space-between; min-height: calc(var(--cw) * 4); }
+.k-col { display: flex; flex-direction: column; min-height: calc(var(--cw) * 1.45); border-radius: 8px; }
+.k-col.empty { border: 1px dashed rgba(255,255,255,.25); }
+.k-col .playing-card { flex-shrink: 0; }
+.k-col .playing-card + .playing-card { margin-top: calc(var(--cw) * -1.1); }
+.k-col .playing-card.back + .playing-card { margin-top: calc(var(--cw) * -1.25); }
+.k-col .playing-card.back + .playing-card.back { margin-top: calc(var(--cw) * -1.3); }
+.k-board .playing-card.selected { transform: none; outline: 3px solid var(--gold); outline-offset: -1px; box-shadow: 0 0 0 3px var(--gold); }
+.k-board .playing-card.hint { outline: 3px solid #74c69d; outline-offset: -1px; }
+.k-target { outline: 2px dashed var(--gold); outline-offset: 2px; }
+.k-slot.hint { outline: 3px solid #74c69d; outline-offset: 2px; }

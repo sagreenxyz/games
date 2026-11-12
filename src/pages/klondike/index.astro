@@ -1,0 +1,57 @@
+---
+import Layout from '../../layouts/Layout.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Layout title="Klondike Solitaire" description="Klondike solitaire — draw 1 or 3, unlimited undo, saved in your browser.">
+  <div class="app klondike">
+    <div class="top-bar">
+      <span class="label">🂮 Klondike</span>
+      <span id="kStats" class="small"></span>
+      <div class="row wrap" style="margin-left:auto;">
+        <label class="row small" style="margin:0;">Draw
+          <select id="kDraw" style="width:auto;padding:.2rem .4rem;">
+            <option value="1">1</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <button id="kUndo" class="btn btn-sm btn-outline">↶ Undo</button>
+        <button id="kHint" class="btn btn-sm btn-outline">💡 Hint</button>
+        <button id="kAuto" class="btn btn-sm btn-success hidden">⚡ Finish</button>
+        <button id="kNew" class="btn btn-sm btn-primary">New game</button>
+      </div>
+    </div>
+
+    <div class="k-board" id="kBoard">
+      <div class="k-top">
+        <div id="kStock" class="k-slot" role="button" tabindex="0" aria-label="Stock — draw cards"></div>
+        <div id="kWaste" class="k-slot k-waste"></div>
+        <div class="k-gap"></div>
+        <div id="kFoundations" class="k-foundations"></div>
+      </div>
+      <div id="kTableau" class="k-tableau"></div>
+    </div>
+    <p id="kMsg" class="msg mt-1 text-center"></p>
+    <details class="rules panel">
+      <summary>How to play</summary>
+      <ul>
+        <li>Move every card to the four foundations, one per suit, from Ace up to King.</li>
+        <li>On the tableau, build down in alternating colours (a red 6 on a black 7). You can move a whole face-up run at once. Only a King can go in an empty column.</li>
+        <li>Click the stock to draw 1 or 3 cards; when it's empty, click it to turn the waste back over.</li>
+        <li>Click a card to pick it up, then click where it should go. Double-click sends a card to its foundation if it can go there.</li>
+        <li>Your game is saved in this browser, so you can come back to it.</li>
+      </ul>
+    </details>
+  </div>
+
+  <div id="kWin" class="modal hidden">
+    <div class="modal-box">
+      <div style="font-size:2.5rem;">🎉</div>
+      <h2>You won!</h2>
+      <p id="kWinStats"></p>
+      <button id="kWinNew" class="btn btn-primary mt-2">Play again</button>
+    </div>
+  </div>
+</Layout>
+<script is:inline src={`${base}/cards.js`}></script>
+<script is:inline src={`${base}/klondike-logic.js`}></script>
+<script is:inline src={`${base}/klondike-game.js`}></script>
