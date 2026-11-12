@@ -1,0 +1,23 @@
+---
+import GameRoom from '../../components/GameRoom.astro';
+import TrickTable from '../../components/TrickTable.astro';
+---
+<GameRoom slug="spades" extra={['tricks-core.js', 'trick-ui.js']}>
+  <Fragment slot="rules">
+    <ul>
+      <li>Four players in two teams: seats 1 &amp; 3 (Team A) against seats 2 &amp; 4 (Team B). Partners sit opposite each other.</li>
+      <li>Everyone bids how many tricks they'll take (0 = <strong>nil</strong>). Your team's contract is the total of your bids.</li>
+      <li>Follow suit if you can. <strong>Spades are trumps</strong> and can't be led until one has been played.</li>
+      <li>Make your contract: 10 per trick bid, +1 per extra trick (a "bag"). Miss it: −10 per trick bid. Every 10 bags costs 100.</li>
+      <li>Nil: +100 if you take no tricks, −100 if you take any. First team to 500 wins.</li>
+    </ul>
+  </Fragment>
+  <TrickTable>
+    <div slot="controls">
+      <div id="bidPanel" class="hidden">
+        <div class="small mb-1">Your bid — how many tricks will you take?</div>
+        <div id="bidGrid" class="bid-grid"></div>
+      </div>
+    </div>
+  </TrickTable>
+</GameRoom>

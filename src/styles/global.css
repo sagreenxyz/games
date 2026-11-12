@@ -302,3 +302,12 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 }
 .trick-seat .cards-row.fan { flex-wrap: nowrap; }
 .trick-seat .cards-row.fan .playing-card + .playing-card { margin-left: -34px; }
+/* Keep the 4-seat table inside narrow screens */
+.trick-table { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
+.trick-seat { min-width: 0; }
+.trick-seat .cards-row.fan { overflow: hidden; justify-content: center; }
+@media (max-width: 520px) {
+  .trick-table { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); padding: .7rem; }
+  .trick-seat .cards-row.fan .playing-card + .playing-card { margin-left: -37px; }
+}
+.score-table td.num { white-space: nowrap; }

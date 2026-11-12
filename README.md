@@ -16,6 +16,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [How to Play — Klondike Solitaire](#-how-to-play--klondike-solitaire)
 - [How to Play — Crazy Eights](#-how-to-play--crazy-eights)
 - [How to Play — Hearts](#️-how-to-play--hearts)
+- [How to Play — Spades](#️-how-to-play--spades)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -208,6 +209,26 @@ Hearts needs four people: if a player leaves for good, the game ends.
 
 ---
 
+## ♠️ How to Play — Spades
+
+Exactly **4 players** in two partnerships: seats 1 & 3 (**Team A**) against seats 2 & 4 (**Team B**). Partners sit opposite each other; the waiting room shows who is on which team.
+
+1. **Bid**: starting left of the dealer, everyone bids how many tricks they expect to take, 0–13. A bid of 0 is **nil**. Your team's contract is the sum of your non-nil bids.
+2. **Play**: the player left of the dealer leads. Follow suit if you can. **Spades are trumps** and can't be led until one has been played (unless you hold only spades).
+3. **Scoring** (per team):
+
+| Result | Points |
+|--------|--------|
+| Contract made | 10 × contract, +1 per extra trick ("bag") |
+| Contract missed | −10 × contract |
+| Every 10 bags accumulated | −100 |
+| Nil made (no tricks) | +100 for that player's team |
+| Nil failed | −100; the nil bidder's tricks count as bags, not toward the partner's contract |
+
+First team to **500** wins (the higher score if both pass 500 in the same hand). If a player leaves for good, the game ends.
+
+---
+
 ## 🏗 Technical Architecture
 
 ### Stack
@@ -370,6 +391,7 @@ games/
 │   ├── crazy-eights-logic.js / crazy-eights-game.js ← Crazy Eights
 │   ├── tricks-core.js / trick-ui.js ← shared trick-taking rules + 4-seat table rendering
 │   ├── hearts-logic.js / hearts-game.js ← Hearts
+│   ├── spades-logic.js / spades-game.js ← Spades
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │
