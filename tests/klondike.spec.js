@@ -8,9 +8,7 @@ const URL_ = 'http://localhost:4321/games/klondike/';
 test.describe('Klondike', () => {
   test('deals a game, draws, undoes and survives a reload', async ({ page }) => {
     page.on('pageerror', e => console.error('[pageerror]', e.message));
-    await page.goto(URL_);
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.goto(URL_); // each test gets a fresh context, so storage starts empty
     await expect(page.locator('#kTableau .k-col')).toHaveCount(7);
     await expect(page.locator('#kTableau .playing-card')).toHaveCount(28);
     await expect(page.locator('#kTableau .playing-card.back')).toHaveCount(21);
@@ -35,9 +33,7 @@ test.describe('Klondike', () => {
   });
 
   test('switching to draw 3 on a fresh game redeals with draw 3', async ({ page }) => {
-    await page.goto(URL_);
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
+    await page.goto(URL_); // each test gets a fresh context, so storage starts empty
     await page.selectOption('#kDraw', '3');
     await page.click('#kStock');
     await expect(page.locator('#kWaste .playing-card')).toHaveCount(3);
