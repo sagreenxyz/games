@@ -11,6 +11,7 @@ A **multiplayer browser games library** built with [Astro](https://astro.build) 
 - [Games Available](#-games-available)
 - [How to Play — Poker](#-how-to-play--texas-holdem-poker)
 - [How to Play — Sevens](#-how-to-play--sevens)
+- [How to Play — Gin Rummy](#-how-to-play--gin-rummy)
 - [Technical Architecture](#-technical-architecture)
 - [Local Development](#️-local-development)
 - [Testing](#-testing)
@@ -127,6 +128,27 @@ If a player runs out of chips they are refilled to 1,000 at the start of the nex
 6. Click **💡 Hint** on your turn to highlight the cards you can play.
 
 If a player leaves mid-game, their cards are dealt out to the players still holding cards, so the game can always be finished.
+
+---
+
+## 🥃 How to Play — Gin Rummy
+
+Two players, 10 cards each. Make **melds**: sets (3 or 4 of a rank) or runs (3+ consecutive cards of one suit; Ace is low, so A-2-3 is a run but Q-K-A is not).
+
+1. **First turn**: the non-dealer may take the face-up card or pass; then the dealer may take it or pass. If both pass, the non-dealer draws from the stock.
+2. **Each turn**: draw from the stock or take the top discard, then discard one card. You can't throw back a card you just took from the discard pile.
+3. **Deadwood** is the value of cards not in melds (Ace 1, 2–10 face value, J/Q/K 10). Your hand is automatically arranged to show your best melds and current deadwood.
+4. **Knock** instead of discarding when your deadwood would be 10 or less. Deadwood 0 is **gin**. If all 11 cards meld right after drawing, you can go **big gin** without discarding.
+5. After a knock, the other player's cards are laid off onto the knocker's melds automatically (not after gin).
+
+| Result | Points |
+|--------|--------|
+| Knock, knocker has less deadwood | Difference in deadwood |
+| Undercut (defender has equal or less) | Difference + 25, to the defender |
+| Gin | 25 + defender's deadwood |
+| Big gin | 31 + defender's deadwood |
+
+If only 2 cards are left in the stock after a discard, the hand is void and the same dealer deals again. First to **100** wins the match: +100 game bonus, +25 per hand won, and the total is doubled for a shutout. If a player leaves, the other wins.
 
 ---
 
@@ -285,6 +307,8 @@ games/
 │   ├── room.js                      ← shared: PeerJS host/guest, lobby, waiting room, redaction, rejoin
 │   ├── poker-logic.js               ← Hold'em rules engine (no DOM) — PokerLogic
 │   ├── poker-game.js                ← Poker UI + host orchestration
+│   ├── rummy-core.js                ← shared meld engine (sets, runs, deadwood, layoffs)
+│   ├── gin-logic.js / gin-game.js   ← Gin Rummy
 │   ├── sevens-logic.js              ← Sevens rules engine (no DOM) — SevensLogic
 │   └── sevens-game.js               ← Sevens UI + host orchestration
 │

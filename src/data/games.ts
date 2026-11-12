@@ -16,6 +16,7 @@ export interface GameInfo {
 
 export const games: GameInfo[] = [
   { slug: 'poker', name: 'Poker', emoji: '🃏', blurb: "Texas Hold'em with side pots and blinds.", players: '2–6 players', mode: 'multi', family: 'betting' },
+  { slug: 'gin', name: 'Gin Rummy', emoji: '🥃', blurb: 'Two-player rummy: build melds, knock with 10 or less, first to 100.', players: '2 players', mode: 'multi', family: 'meld' },
   { slug: 'sevens', name: 'Sevens', emoji: '7️⃣', blurb: 'Fan Tan — build each suit out from its 7. First to empty their hand wins.', players: '2–4 players', mode: 'multi', family: 'shedding' },
 ];
 

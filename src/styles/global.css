@@ -200,7 +200,9 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
   .side-log { width: 100%; }
   .log-list { max-height: 180px; }
 }
-.opp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .75rem; }
+.opp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .75rem; }
+.cards-row.fan { gap: 0; }
+.cards-row.fan .playing-card + .playing-card { margin-left: -26px; }
 .opp { background: rgba(0,0,0,.3); border-radius: var(--radius); padding: .8rem; border: 2px solid transparent; }
 .opp.turn { border-color: var(--gold); }
 .opp.out { opacity: .55; }
@@ -230,3 +232,13 @@ label { font-size: .875rem; color: rgba(255,255,255,.7); margin-bottom: .25rem; 
 .playing-card { transition: transform .12s; }
 .pile { display: flex; flex-direction: column; align-items: center; gap: .3rem; font-size: .75rem; color: rgba(255,255,255,.6); }
 .pile .playing-card.empty { background: rgba(255,255,255,.05); border: 1px dashed rgba(255,255,255,.25); box-shadow: none; }
+
+/* Draw / discard piles (rummy family) */
+.pile-btn { background: none; border: none; padding: 0; cursor: pointer; border-radius: 8px; }
+.pile-btn:disabled { cursor: default; }
+.pile-btn:not(:disabled):hover .playing-card { transform: translateY(-3px); box-shadow: 0 0 0 3px var(--gold); }
+.meld-group { display: inline-flex; gap: .2rem; padding: .25rem; border-radius: 8px; background: rgba(64,145,108,.35); }
+.meld-group.deadwood { background: transparent; }
+.result-hand { margin: .75rem 0; }
+.result-hand .row { gap: .4rem; flex-wrap: wrap; }
+.playing-card.layoff { outline: 3px solid var(--gold); outline-offset: 1px; }

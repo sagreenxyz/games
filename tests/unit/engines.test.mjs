@@ -10,6 +10,7 @@ import { play, interfaceChecks, newGame } from './harness.mjs';
 const ENGINES = [
   { file: 'poker-logic.js', name: 'PokerLogic', rounds: 15, games: 60, mustFinish: true },
   { file: 'sevens-logic.js', name: 'SevensLogic', games: 60, mustFinish: true },
+  { file: 'gin-logic.js', name: 'GinLogic', deps: ['rummy-core.js'], rounds: 30, games: 60, mustFinish: true },
 ];
 
 for (const E of ENGINES) {

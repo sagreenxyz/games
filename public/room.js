@@ -10,7 +10,8 @@
  *
  * Trust model: the host browser is authoritative. Guests only ever receive a
  * redacted copy of the state: the game's `hiddenFields` (e.g. the deck) are
- * removed, and other players' hands are blanked unless the game reveals them.
+ * removed (an array field `stock` is replaced by `stockCount`), and other
+ * players' hands are blanked unless the game reveals them.
  *
  * ── Rules engine interface (`logic`) ──
  *   id, minPlayers, maxPlayers, hiddenFields?: string[]
@@ -123,7 +124,10 @@
   /* ───────────── state distribution ───────────── */
   function redactFor(gs, viewerSeat) {
     const copy = structuredClone(gs);
-    for (const f of (logic.hiddenFields || ['deck'])) delete copy[f];
+    for (const f of (logic.hiddenFields || ['deck'])) {
+      if (Array.isArray(copy[f])) copy[`${f}Count`] = copy[f].length; // e.g. stockCount
+      delete copy[f];
+    }
     for (const [k, p] of Object.entries(copy.players || {})) {
       if (!p) continue;
       const seat = Number(k);
